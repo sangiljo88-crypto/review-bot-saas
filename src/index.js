@@ -24,7 +24,7 @@ app.use("/api/reply", replyRoutes);
 app.use("/api/config", configRoutes);
 
 // SPA 폴백
-app.get("*", (req, res) => {
+app.get("/{path}", (req, res) => s
   if (req.path.startsWith("/api/")) {
     return res.status(404).json({ error: "Not found" });
   }
