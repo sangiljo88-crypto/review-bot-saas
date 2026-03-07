@@ -425,10 +425,13 @@ function pollNaverLogin() {
           blocks.push(`<img src="${data.qrDataUrl}" alt="QR Code" /><br><small style="color:var(--muted);">네이버 앱으로 QR코드를 스캔하세요</small>`);
         }
         if (data.challengeDataUrl) {
+          const challengeNumbers = Array.isArray(data.challengeNumbers) && data.challengeNumbers.length > 0
+            ? `<br><small style="color:var(--warn);">PC 표시 숫자: ${data.challengeNumbers.join(", ")}</small>`
+            : "";
           blocks.push(
             `<div style="margin-top:0.8rem;">
               <img src="${data.challengeDataUrl}" alt="Challenge View" style="max-width:min(100%,560px); width:100%; border:1px solid var(--border); border-radius:8px;" />
-              <br><small style="color:var(--warn);">번호 확인 화면: 휴대폰에 나온 숫자와 같은 숫자를 선택하세요</small>
+              <br><small style="color:var(--warn);">번호 확인 화면: 휴대폰에 나온 숫자와 같은 숫자를 선택하세요</small>${challengeNumbers}
             </div>`
           );
         }

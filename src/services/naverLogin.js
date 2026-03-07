@@ -16,6 +16,7 @@ const POLL_INTERVAL_MS = 2000;
 const CHALLENGE_CAPTURE_INTERVAL_MS = 5000;
 const NUMBER_CHALLENGE_KEYWORDS = [
   "PC화면에 보이는 숫자",
+  "PC 화면에 보이는 숫자",
   "보이는 숫자를 선택",
   "숫자를 선택하면",
   "인증번호",
@@ -86,10 +87,15 @@ async function captureQrDataUrl(page) {
   return null;
 }
 
-async function refreshLoginPreview(session, { allowFullPageFallback = false } = {}) {
+async function refreshLoginPreview(
+  session,
+  { allowFullPageFallback = false, activateQrTab = false } = {}
+) {
   const { page } = session;
 
-  await tryActivateQrTab(page);
+  if (activateQrTab) {
+    await tryActivateQrTab(page);
+  }
   const qrDataUrl = await captureQrDataUrl(page);
 
   if (qrDataUrl) {
@@ -118,6 +124,26 @@ function hasNumberChallenge(text) {
   return NUMBER_CHALLENGE_KEYWORDS.some((keyword) => text.includes(keyword));
 }
 
+async function detectNumericChoices(page) {
+  try {
+    const numbers = await page.evaluate(() => {
+      const nodes = Array.from(document.querySelectorAll("button, a, [role='button'], li, span, div"));
+      const found = new Set();
+      for (const node of nodes) {
+        const text = (node.textContent || "").trim();
+        if (/^\d{1,3}$/.test(text)) {
+          found.add(text);
+        }
+        if (found.size >= 3) break;
+      }
+      return Array.from(found);
+    });
+    return numbers;
+  } catch {
+    return [];
+  }
+}
+
 async function refreshChallengePreview(session) {
   const { page } = session;
   let bodyText = "";
@@ -128,7 +154,12 @@ async function refreshChallengePreview(session) {
     return false;
   }
 
-  if (!hasNumberChallenge(bodyText)) {
+  const numericChoices = await detectNumericChoices(page);
+  const challengeDetected = hasNumberChallenge(bodyText) || numericChoices.length >= 3;
+  session.challengeActive = challengeDetected;
+  session.challengeNumbers = numericChoices;
+
+  if (!challengeDetected) {
     return false;
   }
 
@@ -141,7 +172,9 @@ async function refreshChallengePreview(session) {
     const screenshot = await page.screenshot({ type: "png" });
     session.challengeDataUrl = toDataUrl(screenshot);
     session.lastChallengeCapturedAt = now;
-    session.message = "휴대폰에 나온 숫자를 아래 번호 확인 화면에서 보고 같은 숫자를 선택하세요.";
+    session.message = numericChoices.length >= 3
+      ? `휴대폰에 나온 숫자를 선택하세요. (PC 표시 숫자: ${numericChoices.join(", ")})`
+      : "휴대폰에 나온 숫자를 아래 번호 확인 화면에서 보고 같은 숫자를 선택하세요.";
     return true;
   } catch {
     return false;
@@ -178,6 +211,8 @@ export async function launchLoginBrowser(userId, platform) {
     qrDataUrl: null,          // QR 코드 이미지 (추후 확장용)
     challengeDataUrl: null,   // 숫자 선택 인증용 화면
     lastChallengeCapturedAt: 0,
+    challengeActive: false,
+    challengeNumbers: [],
     fullPageFallbackUsed: false,
     message: "네이버 로그인 페이지로 이동 중...",
     createdAt: Date.now(),
@@ -208,7 +243,7 @@ async function detectLogin(session) {
     session.message = "네이버 로그인 페이지가 준비되었습니다. 아래 방법 중 하나로 로그인해주세요.";
 
     await page.waitForTimeout(1200);
-    await refreshLoginPreview(session, { allowFullPageFallback: true });
+    await refreshLoginPreview(session, { allowFullPageFallback: true, activateQrTab: true });
     await refreshChallengePreview(session);
 
     // 쿠키 감지 루프
@@ -249,10 +284,12 @@ async function detectLogin(session) {
       }
 
       // 숫자 선택 인증(모바일) 화면이 뜨면 번호 확인용 이미지를 함께 전송
-      await refreshChallengePreview(session);
+      const challengeVisible = await refreshChallengePreview(session);
 
       // QR 갱신 시도
-      await refreshLoginPreview(session);
+      if (!challengeVisible) {
+        await refreshLoginPreview(session, { activateQrTab: false });
+      }
 
       await page.waitForTimeout(POLL_INTERVAL_MS);
     }
@@ -276,6 +313,7 @@ export function getLoginStatus(sessionId) {
     message: session.message,
     qrDataUrl: session.qrDataUrl,
     challengeDataUrl: session.challengeDataUrl,
+    challengeNumbers: session.challengeNumbers,
     elapsed: Math.round((Date.now() - session.createdAt) / 1000),
   };
 }
