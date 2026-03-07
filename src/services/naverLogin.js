@@ -14,6 +14,7 @@ const AUTH_CHECK_URLS = [
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000; // 5분
 const POLL_INTERVAL_MS = 2000;
 const CHALLENGE_CAPTURE_INTERVAL_MS = 5000;
+const PC_PREVIEW_CAPTURE_INTERVAL_MS = 2500;
 const NUMBER_CHALLENGE_KEYWORDS = [
   "PC화면에 보이는 숫자",
   "PC 화면에 보이는 숫자",
@@ -181,6 +182,21 @@ async function refreshChallengePreview(session) {
   }
 }
 
+async function refreshPcPreview(session, { force = false } = {}) {
+  const now = Date.now();
+  if (!force && session.pcPreviewDataUrl && now - session.lastPcPreviewCapturedAt < PC_PREVIEW_CAPTURE_INTERVAL_MS) {
+    return false;
+  }
+  try {
+    const screenshot = await session.page.screenshot({ type: "png" });
+    session.pcPreviewDataUrl = toDataUrl(screenshot);
+    session.lastPcPreviewCapturedAt = now;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 네이버 로그인 브라우저 세션을 시작합니다.
  * 사용자가 웹 UI에서 QR코드 또는 쿠키 입력 방식으로 로그인을 완료하면
@@ -196,7 +212,7 @@ export async function launchLoginBrowser(userId, platform) {
 
   const sessionId = crypto.randomUUID();
   const browser = await chromium.launch(buildLaunchOptions());
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const context = await browser.newContext({ viewport: { width: 1366, height: 960 } });
   const page = await context.newPage();
 
   const session = {
@@ -213,6 +229,8 @@ export async function launchLoginBrowser(userId, platform) {
     lastChallengeCapturedAt: 0,
     challengeActive: false,
     challengeNumbers: [],
+    pcPreviewDataUrl: null,   // 서버 측 실제 로그인 페이지 화면
+    lastPcPreviewCapturedAt: 0,
     fullPageFallbackUsed: false,
     message: "네이버 로그인 페이지로 이동 중...",
     createdAt: Date.now(),
@@ -245,6 +263,7 @@ async function detectLogin(session) {
     await page.waitForTimeout(1200);
     await refreshLoginPreview(session, { allowFullPageFallback: true, activateQrTab: true });
     await refreshChallengePreview(session);
+    await refreshPcPreview(session, { force: true });
 
     // 쿠키 감지 루프
     const startTime = Date.now();
@@ -285,6 +304,7 @@ async function detectLogin(session) {
 
       // 숫자 선택 인증(모바일) 화면이 뜨면 번호 확인용 이미지를 함께 전송
       const challengeVisible = await refreshChallengePreview(session);
+      await refreshPcPreview(session);
 
       // QR 갱신 시도
       if (!challengeVisible) {
@@ -314,6 +334,7 @@ export function getLoginStatus(sessionId) {
     qrDataUrl: session.qrDataUrl,
     challengeDataUrl: session.challengeDataUrl,
     challengeNumbers: session.challengeNumbers,
+    pcPreviewDataUrl: session.pcPreviewDataUrl,
     elapsed: Math.round((Date.now() - session.createdAt) / 1000),
   };
 }
