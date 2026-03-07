@@ -72,7 +72,7 @@ export async function launchLoginBrowser(userId, platform) {
 }
 
 async function detectLogin(session) {
-  const { page, context, sessionId } = session;
+  const { page, context } = session;
 
   try {
     await page.goto(NAVER_LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 15000 });

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { query } from "../db/database.js";
 import { signToken, authRequired, COOKIE_NAME } from "../middleware/auth.js";
 
@@ -90,7 +90,7 @@ router.get("/me", authRequired, async (req, res) => {
 
     // 네이버 세션 연결 상태도 함께 반환
     const sessions = await query(
-      "SELECT platform, label, updated_at FROM naver_sessions WHERE user_id = $1",
+      "SELECT id, platform, label, updated_at FROM naver_sessions WHERE user_id = $1",
       [req.userId]
     );
     res.json({

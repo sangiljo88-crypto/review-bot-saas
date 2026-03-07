@@ -1,6 +1,5 @@
 import OpenAI from "openai";
 
-let openaiClient;
 const generatedReplyHistory = [];
 const maxReplyHistory = 120;
 
@@ -62,17 +61,13 @@ const noReviewClosingOptions = [
   "다음에도 또 뵙겠습니다."
 ];
 
-function getOpenAIClient() {
-  const apiKey = process.env.OPENAI_API_KEY;
+function getOpenAIClient(aiConfig) {
+  const apiKey = aiConfig?.apiKey || process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY 환경변수가 없습니다.");
   }
 
-  if (!openaiClient) {
-    openaiClient = new OpenAI({ apiKey });
-  }
-
-  return openaiClient;
+  return new OpenAI({ apiKey });
 }
 
 export function normalizeReviewText(rawText) {
@@ -257,10 +252,10 @@ async function generateNoReviewReply(aiConfig) {
         keywordPhrase,
         baseMessage: baseMessage.replace(/\[키워드\]/g, selectedKeyword || "")
       });
-      let content = await requestChatCompletion(getOpenAIClient(), aiConfig, prompt, 0);
+      let content = await requestChatCompletion(getOpenAIClient(aiConfig), aiConfig, prompt, 0);
       if (content && isDuplicateReply(content)) {
         const retryPrompt = `${prompt}\n\n중요: 직전 답글과 표현이 겹칩니다. 문장을 완전히 다르게 다시 작성하세요.`;
-        content = await requestChatCompletion(getOpenAIClient(), aiConfig, retryPrompt, 0.12);
+        content = await requestChatCompletion(getOpenAIClient(aiConfig), aiConfig, retryPrompt, 0.12);
       }
       if (content) {
         const finalized = enforceKeywordPhrase(content, selectedKeyword);
@@ -288,7 +283,7 @@ async function generateNoReviewReply(aiConfig) {
 }
 
 async function generateWithAI(reviewText, aiConfig) {
-  const client = getOpenAIClient();
+  const client = getOpenAIClient(aiConfig);
   const selectedKeyword = pickRandomKeyword(aiConfig.keywords);
   const userPrompt = buildUserPromptWithKeyword(reviewText, selectedKeyword);
   if (selectedKeyword) {

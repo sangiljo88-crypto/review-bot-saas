@@ -63,10 +63,8 @@ function mergeAiConfig(userConfig, apiKey) {
       ? userAi.keywords
       : DEFAULT_AI_CONFIG.keywords,
     noReviewBaseMessage: userAi.noReviewBaseMessage || DEFAULT_AI_CONFIG.noReviewBaseMessage,
+    apiKey: apiKey || process.env.OPENAI_API_KEY,
   };
-  if (apiKey) {
-    process.env.OPENAI_API_KEY = apiKey;
-  }
   return aiConfig;
 }
 
@@ -105,7 +103,6 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
       onLog("warn", "리뷰 카드를 찾지 못했습니다. 네이버 세션이 만료되었을 수 있습니다.");
       result.status = "failed";
       result.exitCode = 1;
-      await onFinish(result);
       return;
     }
 

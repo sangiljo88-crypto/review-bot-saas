@@ -26,6 +26,8 @@ Railway Dashboard → New → Database → PostgreSQL
 | `SESSION_ENCRYPT_KEY` | 세션 암호화 키 (정확히 32자) |
 | `OPENAI_API_KEY` | (선택) 서버 기본 API 키 |
 
+`DATABASE_URL`, `JWT_SECRET`, `SESSION_ENCRYPT_KEY`가 없으면 서버가 시작되지 않습니다.
+
 ### 3. 배포
 
 ```bash
@@ -33,6 +35,12 @@ git push
 ```
 
 Railway가 Dockerfile을 감지하여 자동 빌드 및 배포합니다.
+
+### 4. 도메인 생성 및 접속
+
+Railway Service → Settings → Networking → **Generate Domain**
+
+생성된 URL로 접속하고, 서버가 살아있는지 `GET /healthz`로 확인할 수 있습니다.
 
 ## 로컬 개발
 
