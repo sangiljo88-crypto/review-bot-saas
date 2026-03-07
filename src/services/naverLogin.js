@@ -3,7 +3,9 @@ import crypto from "node:crypto";
 import { saveNaverSession } from "../routes/naver.js";
 
 const NAVER_LOGIN_URL = "https://nid.naver.com/nidlogin.login";
+const NAVER_LOGIN_HOST = "nid.naver.com";
 const AUTH_CHECK_URLS = [
+  "https://nid.naver.com",
   "https://naver.com",
   "https://www.naver.com",
   "https://new.smartplace.naver.com",
@@ -11,6 +13,13 @@ const AUTH_CHECK_URLS = [
 ];
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000; // 5분
 const POLL_INTERVAL_MS = 2000;
+const CHALLENGE_CAPTURE_INTERVAL_MS = 5000;
+const NUMBER_CHALLENGE_KEYWORDS = [
+  "PC화면에 보이는 숫자",
+  "보이는 숫자를 선택",
+  "숫자를 선택하면",
+  "인증번호",
+];
 const QR_TAB_SELECTORS = [
   'button:has-text("QR코드")',
   'a:has-text("QR코드")',
@@ -85,7 +94,9 @@ async function refreshLoginPreview(session, { allowFullPageFallback = false } = 
 
   if (qrDataUrl) {
     session.qrDataUrl = qrDataUrl;
-    session.message = "QR 코드가 준비되었습니다. 네이버 앱으로 스캔하세요.";
+    if (!session.challengeDataUrl) {
+      session.message = "QR 코드가 준비되었습니다. 네이버 앱으로 스캔하세요.";
+    }
     return true;
   }
 
@@ -101,6 +112,40 @@ async function refreshLoginPreview(session, { allowFullPageFallback = false } = 
   }
 
   return false;
+}
+
+function hasNumberChallenge(text) {
+  return NUMBER_CHALLENGE_KEYWORDS.some((keyword) => text.includes(keyword));
+}
+
+async function refreshChallengePreview(session) {
+  const { page } = session;
+  let bodyText = "";
+
+  try {
+    bodyText = await page.evaluate(() => document.body?.innerText || "");
+  } catch {
+    return false;
+  }
+
+  if (!hasNumberChallenge(bodyText)) {
+    return false;
+  }
+
+  const now = Date.now();
+  if (session.challengeDataUrl && now - session.lastChallengeCapturedAt < CHALLENGE_CAPTURE_INTERVAL_MS) {
+    return true;
+  }
+
+  try {
+    const screenshot = await page.screenshot({ type: "png" });
+    session.challengeDataUrl = toDataUrl(screenshot);
+    session.lastChallengeCapturedAt = now;
+    session.message = "휴대폰에 나온 숫자를 아래 번호 확인 화면에서 보고 같은 숫자를 선택하세요.";
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -131,6 +176,8 @@ export async function launchLoginBrowser(userId, platform) {
     status: "waiting",        // waiting | checking | success | failed | cancelled
     loginUrl: NAVER_LOGIN_URL,
     qrDataUrl: null,          // QR 코드 이미지 (추후 확장용)
+    challengeDataUrl: null,   // 숫자 선택 인증용 화면
+    lastChallengeCapturedAt: 0,
     fullPageFallbackUsed: false,
     message: "네이버 로그인 페이지로 이동 중...",
     createdAt: Date.now(),
@@ -162,6 +209,7 @@ async function detectLogin(session) {
 
     await page.waitForTimeout(1200);
     await refreshLoginPreview(session, { allowFullPageFallback: true });
+    await refreshChallengePreview(session);
 
     // 쿠키 감지 루프
     const startTime = Date.now();
@@ -169,8 +217,13 @@ async function detectLogin(session) {
       if (session.status === "cancelled") return;
 
       session.status = "checking";
-      const cookies = await context.cookies(...AUTH_CHECK_URLS);
+      const currentUrl = page.url();
+      const cookies = await context.cookies(...AUTH_CHECK_URLS, currentUrl);
       const hasAuth = cookies.some((c) => c.name === "NID_SES" || c.name === "NID_AUT");
+      const leftLoginPage =
+        currentUrl &&
+        !currentUrl.includes(`${NAVER_LOGIN_HOST}/nidlogin.login`) &&
+        !currentUrl.includes("about:blank");
 
       if (hasAuth) {
         session.status = "success";
@@ -184,6 +237,19 @@ async function detectLogin(session) {
         setTimeout(() => destroyLoginBrowser(session.id), 3000);
         return;
       }
+
+      // 일부 환경에서는 쿠키 반영이 지연되고, 먼저 로그인 페이지를 벗어나는 경우가 있습니다.
+      if (leftLoginPage && cookies.some((c) => c.domain?.includes("naver.com"))) {
+        session.status = "success";
+        session.message = "로그인 성공(리다이렉트 감지)! 세션을 저장합니다.";
+        const storageState = await context.storageState();
+        await saveNaverSession(session.userId, session.platform, storageState, "웹 로그인");
+        setTimeout(() => destroyLoginBrowser(session.id), 3000);
+        return;
+      }
+
+      // 숫자 선택 인증(모바일) 화면이 뜨면 번호 확인용 이미지를 함께 전송
+      await refreshChallengePreview(session);
 
       // QR 갱신 시도
       await refreshLoginPreview(session);
@@ -209,6 +275,7 @@ export function getLoginStatus(sessionId) {
     status: session.status,
     message: session.message,
     qrDataUrl: session.qrDataUrl,
+    challengeDataUrl: session.challengeDataUrl,
     elapsed: Math.round((Date.now() - session.createdAt) / 1000),
   };
 }
