@@ -1,0 +1,25 @@
+{
+  "name": "smart-review-saas",
+  "version": "1.0.0",
+  "description": "네이버 리뷰 자동 답글 SaaS",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "db:init": "node src/db/init.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "pg": "^8.13.0",
+    "bcrypt": "^5.1.1",
+    "jsonwebtoken": "^9.0.2",
+    "cookie-parser": "^1.4.7",
+    "openai": "^6.25.0",
+    "playwright": "^1.53.0",
+    "crypto": "^1.0.1"
+  }
+}

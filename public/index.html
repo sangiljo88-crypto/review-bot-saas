@@ -1,0 +1,703 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Review AI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0c0e14;
+      --surface: #13161f;
+      --surface2: #1a1e2b;
+      --border: #252a3a;
+      --text: #e4e8f1;
+      --muted: #7a829b;
+      --primary: #6366f1;
+      --primary-hover: #818cf8;
+      --success: #22c55e;
+      --danger: #ef4444;
+      --warn: #f59e0b;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Noto Sans KR', sans-serif;
+      background: var(--bg); color: var(--text);
+      min-height: 100vh;
+    }
+    .container { max-width: 720px; margin: 0 auto; padding: 1.5rem 1rem; }
+
+    /* ── Header ─── */
+    .header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 1rem 0; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border);
+    }
+    .header h1 { font-size: 1.2rem; font-weight: 800; color: var(--primary); }
+    .header-right { display: flex; align-items: center; gap: 0.75rem; }
+    .user-email { font-size: 0.82rem; color: var(--muted); }
+
+    /* ── Cards ─── */
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1rem;
+    }
+    .card-title { font-size: 0.95rem; font-weight: 700; margin-bottom: 0.75rem; }
+
+    /* ── Forms ─── */
+    .field { margin-bottom: 0.75rem; }
+    .field label { display: block; font-size: 0.82rem; color: var(--muted); margin-bottom: 0.3rem; }
+    .field input, .field select {
+      width: 100%; padding: 0.6rem 0.75rem; background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 8px; color: var(--text);
+      font-size: 0.9rem; outline: none; transition: border 0.2s;
+    }
+    .field input:focus, .field select:focus { border-color: var(--primary); }
+
+    /* ── Buttons ─── */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 0.6rem 1.1rem; border: none; border-radius: 8px;
+      font-size: 0.88rem; font-weight: 600; cursor: pointer; transition: all 0.15s;
+    }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+    .btn-sm { padding: 0.4rem 0.75rem; font-size: 0.8rem; }
+    .btn-block { width: 100%; }
+    .row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+    .row-between { justify-content: space-between; }
+    .grow { flex: 1; }
+
+    /* ── Status ─── */
+    .badge {
+      display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px;
+      font-size: 0.72rem; font-weight: 700;
+    }
+    .badge-success { background: #22c55e20; color: var(--success); }
+    .badge-warn { background: #f59e0b20; color: var(--warn); }
+    .badge-danger { background: #ef444420; color: var(--danger); }
+    .badge-muted { background: #7a829b15; color: var(--muted); }
+
+    /* ── Radio ─── */
+    .radio-group { display: flex; gap: 0.75rem; }
+    .radio-group label { font-size: 0.88rem; color: var(--text); cursor: pointer; display: flex; align-items: center; gap: 0.3rem; }
+
+    /* ── Log ─── */
+    .log-box {
+      background: #080a10; border: 1px solid var(--border); border-radius: 8px;
+      min-height: 200px; max-height: 360px; overflow: auto; padding: 0.75rem;
+      font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; line-height: 1.5;
+      color: #9ca3c0;
+    }
+    .log-box .log-done { color: var(--success); }
+    .log-box .log-error { color: var(--danger); }
+    .log-box .log-warn { color: var(--warn); }
+    .log-box .log-system { color: var(--primary); }
+    .log-box .log-dry-run { color: #38bdf8; }
+
+    /* ── Auth Page ─── */
+    .auth-page {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; min-height: 100vh; padding: 2rem;
+    }
+    .auth-box {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 2rem; width: min(400px, 100%);
+    }
+    .auth-box h1 { font-size: 1.3rem; font-weight: 800; text-align: center; margin-bottom: 0.3rem; color: var(--primary); }
+    .auth-box p { text-align: center; color: var(--muted); font-size: 0.85rem; margin-bottom: 1.5rem; }
+    .auth-toggle { text-align: center; margin-top: 1rem; font-size: 0.85rem; color: var(--muted); }
+    .auth-toggle a { color: var(--primary); cursor: pointer; text-decoration: underline; }
+    .error-msg { color: var(--danger); font-size: 0.82rem; margin-bottom: 0.5rem; }
+
+    /* ── QR section ─── */
+    .qr-section { text-align: center; padding: 1rem 0; }
+    .qr-section img { max-width: 200px; border-radius: 8px; margin: 0.5rem 0; }
+    .login-status-msg { font-size: 0.88rem; color: var(--muted); margin: 0.5rem 0; }
+    .login-status-msg.success { color: var(--success); }
+
+    /* ── History ─── */
+    .history-item {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0.5rem 0; border-bottom: 1px solid var(--border);
+      font-size: 0.82rem;
+    }
+    .history-item:last-child { border-bottom: none; }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+<!-- ════════ AUTH VIEW ════════ -->
+<div id="authView" class="auth-page">
+  <div class="auth-box">
+    <h1>Smart Review AI</h1>
+    <p>네이버 리뷰 자동 답글 서비스</p>
+    <div id="authError" class="error-msg hidden"></div>
+    <div id="signupFields">
+      <div class="field">
+        <label>이름 (매장명)</label>
+        <input id="authName" type="text" placeholder="조상일커피" />
+      </div>
+    </div>
+    <div class="field">
+      <label>이메일</label>
+      <input id="authEmail" type="email" placeholder="email@example.com" />
+    </div>
+    <div class="field">
+      <label>비밀번호</label>
+      <input id="authPassword" type="password" placeholder="6자 이상" />
+    </div>
+    <button id="authSubmitBtn" class="btn btn-primary btn-block" onclick="handleAuth()">회원가입</button>
+    <div class="auth-toggle">
+      <span id="authToggleText">이미 계정이 있나요?</span>
+      <a id="authToggleLink" onclick="toggleAuthMode()">로그인</a>
+    </div>
+  </div>
+</div>
+
+<!-- ════════ DASHBOARD VIEW ════════ -->
+<div id="dashView" class="container hidden">
+  <div class="header">
+    <h1>Smart Review AI</h1>
+    <div class="header-right">
+      <span id="userEmail" class="user-email"></span>
+      <button class="btn btn-ghost btn-sm" onclick="handleLogout()">로그아웃</button>
+    </div>
+  </div>
+
+  <!-- 네이버 연결 상태 -->
+  <div class="card">
+    <div class="row row-between" style="margin-bottom:0.5rem;">
+      <span class="card-title" style="margin:0;">네이버 계정 연결</span>
+      <span id="naverStatus"></span>
+    </div>
+    <p style="font-size:0.82rem; color:var(--muted); margin-bottom:0.75rem;">
+      리뷰 답글을 자동 작성하려면 네이버 계정 로그인이 필요합니다.
+    </p>
+    <div id="naverNotConnected">
+      <div class="row" style="gap:0.5rem; margin-bottom:0.5rem;">
+        <select id="naverPlatformSelect" style="width:auto; padding:0.5rem; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:0.85rem;">
+          <option value="smartplace">스마트플레이스</option>
+          <option value="smartstore">스마트스토어</option>
+        </select>
+        <button id="naverLoginBtn" class="btn btn-primary btn-sm" onclick="startNaverLogin()">네이버 로그인</button>
+      </div>
+    </div>
+    <div id="naverLoginProgress" class="hidden">
+      <div class="qr-section">
+        <div id="qrContainer"></div>
+        <div id="naverLoginMsg" class="login-status-msg">로그인 준비 중...</div>
+        <button class="btn btn-ghost btn-sm" onclick="cancelNaverLogin()">취소</button>
+      </div>
+    </div>
+    <div id="naverConnected" class="hidden" style="font-size:0.85rem; color:var(--success);">
+      ✓ 연결됨 <button class="btn btn-ghost btn-sm" onclick="disconnectNaver()" style="margin-left:0.5rem;">연결 해제</button>
+    </div>
+  </div>
+
+  <!-- OpenAI API Key -->
+  <div class="card">
+    <div class="card-title">OpenAI API Key</div>
+    <div class="row">
+      <div class="grow">
+        <input id="apiKeyInput" type="password" placeholder="sk-..." style="width:100%; padding:0.5rem 0.7rem; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:0.85rem;" />
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="saveApiKey()">저장</button>
+    </div>
+    <p style="font-size:0.78rem; color:var(--muted); margin-top:0.3rem;">브라우저에만 저장되며, 실행 시 서버로 전달됩니다.</p>
+  </div>
+
+  <!-- AI 설정 -->
+  <div class="card">
+    <div class="row row-between" style="margin-bottom:0.5rem;">
+      <span class="card-title" style="margin:0;">AI 답글 설정</span>
+      <button class="btn btn-ghost btn-sm" onclick="toggleAiSettings()">
+        <span id="aiSettingsToggleText">펼치기</span>
+      </button>
+    </div>
+    <p style="font-size:0.82rem; color:var(--muted); margin-bottom:0.5rem;">내 업체에 맞는 답글 스타일을 설정하세요.</p>
+
+    <div id="aiSettingsPanel" class="hidden">
+      <!-- 프롬프트 -->
+      <div class="field">
+        <label>AI 프롬프트 (답글 작성 지침)</label>
+        <textarea id="cfgPrompt" rows="10" style="width:100%; padding:0.6rem 0.75rem; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:0.83rem; line-height:1.5; resize:vertical; font-family:inherit;"></textarea>
+        <div style="margin-top:0.4rem;">
+          <button class="btn btn-ghost btn-sm" onclick="loadPromptExample('cafe')" style="margin-right:0.3rem;">☕ 카페 예시</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadPromptExample('restaurant')" style="margin-right:0.3rem;">🍽️ 음식점 예시</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadPromptExample('beauty')" style="margin-right:0.3rem;">💇 미용실 예시</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadPromptExample('shop')">🛍️ 쇼핑몰 예시</button>
+        </div>
+      </div>
+
+      <!-- 키워드 -->
+      <div class="field">
+        <label>SEO 키워드 (답글마다 1개 랜덤 삽입, 엔터로 추가)</label>
+        <div id="keywordTags" style="display:flex; flex-wrap:wrap; gap:0.4rem; margin-bottom:0.4rem;"></div>
+        <div class="row">
+          <input id="keywordInput" type="text" placeholder="예: 군포카페, 당정동맛집" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();addKeyword();}" />
+          <button class="btn btn-ghost btn-sm" onclick="addKeyword()">추가</button>
+        </div>
+        <p style="font-size:0.75rem; color:var(--muted); margin-top:0.25rem;">네이버 검색에 노출되고 싶은 키워드를 입력하세요. 답글에 자연스럽게 포함됩니다.</p>
+      </div>
+
+      <!-- 무리뷰 기본 멘트 -->
+      <div class="field">
+        <label>텍스트 없는 리뷰용 기본 멘트</label>
+        <textarea id="cfgNoReviewMsg" rows="3" style="width:100%; padding:0.6rem 0.75rem; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:0.83rem; line-height:1.5; resize:vertical; font-family:inherit;" placeholder="리뷰 텍스트가 없을 때 이 멘트를 기반으로 AI가 변주합니다."></textarea>
+        <p style="font-size:0.75rem; color:var(--muted); margin-top:0.25rem;">[키워드] 자리에 위 키워드 중 하나가 자동 삽입됩니다.</p>
+      </div>
+
+      <!-- 리뷰 관리 URL -->
+      <div class="field">
+        <label>스마트플레이스 리뷰 관리 URL</label>
+        <input id="cfgReviewUrl" type="text" placeholder="https://new.smartplace.naver.com/bizes/place/1234567/reviews?..." />
+        <p style="font-size:0.75rem; color:var(--muted); margin-top:0.25rem;">스마트플레이스 → 리뷰관리 페이지의 주소를 붙여넣으세요.</p>
+      </div>
+
+      <div class="row" style="margin-top:0.75rem;">
+        <button class="btn btn-primary btn-sm" onclick="saveAiConfig()">설정 저장</button>
+        <span id="cfgSaveStatus" style="font-size:0.82rem; color:var(--success);"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 리뷰 답글 실행 -->
+  <div class="card">
+    <div class="card-title">리뷰 답글 실행</div>
+    <div class="field">
+      <label>플랫폼</label>
+      <div class="radio-group">
+        <label><input type="radio" name="platform" value="smartplace" checked /> 스마트플레이스</label>
+        <label><input type="radio" name="platform" value="smartstore" /> 스마트스토어</label>
+      </div>
+    </div>
+    <div class="field">
+      <label>모드</label>
+      <div class="radio-group">
+        <label><input type="radio" name="mode" value="dry-run" checked /> 테스트(dry-run)</label>
+        <label><input type="radio" name="mode" value="submit" /> 실제 등록</label>
+      </div>
+    </div>
+    <div class="row" style="margin-top:0.75rem;">
+      <button id="replyStartBtn" class="btn btn-primary" onclick="startReply()">실행</button>
+      <button id="replyStopBtn" class="btn btn-danger btn-sm hidden" onclick="stopReply()">중지</button>
+      <span id="replyStatusBadge"></span>
+    </div>
+  </div>
+
+  <!-- 로그 -->
+  <div class="card">
+    <div class="card-title">실행 로그</div>
+    <div id="logBox" class="log-box">준비 완료</div>
+  </div>
+
+  <!-- 실행 이력 -->
+  <div class="card">
+    <div class="card-title">최근 실행 이력</div>
+    <div id="historyList"><span style="font-size:0.82rem; color:var(--muted);">로딩 중...</span></div>
+  </div>
+</div>
+
+<script>
+const API_KEY_STORAGE = "sr_openai_key";
+let authMode = "signup";
+let currentNaverLoginSession = null;
+let naverPollTimer = null;
+let currentJobId = null;
+let currentEventSource = null;
+let currentNaverSessionId = null;
+
+// ── Auth ────────────────────────────
+function toggleAuthMode() {
+  authMode = authMode === "signup" ? "login" : "signup";
+  document.getElementById("signupFields").classList.toggle("hidden", authMode === "login");
+  document.getElementById("authSubmitBtn").textContent = authMode === "signup" ? "회원가입" : "로그인";
+  document.getElementById("authToggleText").textContent = authMode === "signup" ? "이미 계정이 있나요?" : "계정이 없나요?";
+  document.getElementById("authToggleLink").textContent = authMode === "signup" ? "로그인" : "회원가입";
+  document.getElementById("authError").classList.add("hidden");
+}
+
+async function handleAuth() {
+  const email = document.getElementById("authEmail").value.trim();
+  const password = document.getElementById("authPassword").value;
+  const name = document.getElementById("authName")?.value?.trim() || "";
+  const errEl = document.getElementById("authError");
+  errEl.classList.add("hidden");
+
+  const url = authMode === "signup" ? "/api/auth/signup" : "/api/auth/login";
+  const body = authMode === "signup" ? { email, password, name } : { email, password };
+
+  try {
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error; errEl.classList.remove("hidden"); return; }
+    showDashboard(data.user);
+  } catch (e) { errEl.textContent = "네트워크 오류"; errEl.classList.remove("hidden"); }
+}
+
+async function handleLogout() {
+  await fetch("/api/auth/logout", { method: "POST" });
+  document.getElementById("authView").classList.remove("hidden");
+  document.getElementById("dashView").classList.add("hidden");
+}
+
+async function checkSession() {
+  try {
+    const res = await fetch("/api/auth/me");
+    if (!res.ok) return;
+    const data = await res.json();
+    showDashboard(data.user, data.naverSessions);
+  } catch { /* not logged in */ }
+}
+
+function showDashboard(user, naverSessions) {
+  document.getElementById("authView").classList.add("hidden");
+  document.getElementById("dashView").classList.remove("hidden");
+  document.getElementById("userEmail").textContent = user.email;
+  updateNaverStatus(naverSessions || []);
+  loadApiKey();
+  loadHistory();
+}
+
+// ── Naver Session ────────────────────
+function updateNaverStatus(sessions) {
+  const statusEl = document.getElementById("naverStatus");
+  const connectedEl = document.getElementById("naverConnected");
+  const notConnectedEl = document.getElementById("naverNotConnected");
+
+  if (sessions.length > 0) {
+    statusEl.innerHTML = '<span class="badge badge-success">연결됨</span>';
+    connectedEl.classList.remove("hidden");
+    notConnectedEl.classList.add("hidden");
+    currentNaverSessionId = sessions[0].id;
+  } else {
+    statusEl.innerHTML = '<span class="badge badge-warn">미연결</span>';
+    connectedEl.classList.add("hidden");
+    notConnectedEl.classList.remove("hidden");
+    currentNaverSessionId = null;
+  }
+}
+
+async function startNaverLogin() {
+  const platform = document.getElementById("naverPlatformSelect").value;
+  document.getElementById("naverLoginProgress").classList.remove("hidden");
+  document.getElementById("naverLoginBtn").disabled = true;
+  document.getElementById("naverLoginMsg").textContent = "로그인 세션 준비 중...";
+
+  try {
+    const res = await fetch("/api/naver/start-login", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ platform })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    currentNaverLoginSession = data.sessionId;
+    pollNaverLogin();
+  } catch (e) {
+    document.getElementById("naverLoginMsg").textContent = "오류: " + e.message;
+    document.getElementById("naverLoginBtn").disabled = false;
+  }
+}
+
+function pollNaverLogin() {
+  if (!currentNaverLoginSession) return;
+  naverPollTimer = setInterval(async () => {
+    try {
+      const res = await fetch(`/api/naver/login-status/${currentNaverLoginSession}`);
+      const data = await res.json();
+      if (!res.ok) { clearInterval(naverPollTimer); return; }
+
+      const msgEl = document.getElementById("naverLoginMsg");
+      msgEl.textContent = data.message;
+
+      if (data.qrDataUrl) {
+        const container = document.getElementById("qrContainer");
+        container.innerHTML = `<img src="${data.qrDataUrl}" alt="QR Code" /><br><small style="color:var(--muted);">네이버 앱으로 QR코드를 스캔하세요</small>`;
+      }
+
+      if (data.status === "success") {
+        msgEl.classList.add("success");
+        clearInterval(naverPollTimer);
+        currentNaverLoginSession = null;
+        document.getElementById("naverLoginProgress").classList.add("hidden");
+        document.getElementById("naverLoginBtn").disabled = false;
+        // 세션 갱신
+        const meRes = await fetch("/api/auth/me");
+        const meData = await meRes.json();
+        updateNaverStatus(meData.naverSessions || []);
+      } else if (data.status === "failed" || data.status === "cancelled") {
+        clearInterval(naverPollTimer);
+        currentNaverLoginSession = null;
+        document.getElementById("naverLoginBtn").disabled = false;
+      }
+    } catch { /* ignore */ }
+  }, 2000);
+}
+
+async function cancelNaverLogin() {
+  if (currentNaverLoginSession) {
+    await fetch(`/api/naver/cancel-login/${currentNaverLoginSession}`, { method: "POST" });
+  }
+  clearInterval(naverPollTimer);
+  currentNaverLoginSession = null;
+  document.getElementById("naverLoginProgress").classList.add("hidden");
+  document.getElementById("naverLoginBtn").disabled = false;
+}
+
+async function disconnectNaver() {
+  if (!currentNaverSessionId) return;
+  await fetch(`/api/naver/sessions/${currentNaverSessionId}`, { method: "DELETE" });
+  updateNaverStatus([]);
+}
+
+// ── API Key ────────────────────
+function saveApiKey() {
+  const key = document.getElementById("apiKeyInput").value.trim();
+  if (key) localStorage.setItem(API_KEY_STORAGE, key);
+  else localStorage.removeItem(API_KEY_STORAGE);
+}
+function loadApiKey() {
+  const stored = localStorage.getItem(API_KEY_STORAGE);
+  if (stored) document.getElementById("apiKeyInput").value = stored;
+}
+
+// ── Reply Execution ────────────────
+async function startReply() {
+  const platform = document.querySelector("input[name='platform']:checked")?.value || "smartplace";
+  const mode = document.querySelector("input[name='mode']:checked")?.value || "dry-run";
+  const apiKey = document.getElementById("apiKeyInput").value.trim();
+  const logBox = document.getElementById("logBox");
+  logBox.textContent = "";
+
+  try {
+    const res = await fetch("/api/reply/start", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ platform, mode, apiKey })
+    });
+    const data = await res.json();
+    if (!res.ok) { logBox.textContent = "[error] " + data.error; return; }
+
+    currentJobId = data.jobId;
+    document.getElementById("replyStartBtn").disabled = true;
+    document.getElementById("replyStopBtn").classList.remove("hidden");
+    document.getElementById("replyStatusBadge").innerHTML = '<span class="badge badge-warn">실행중</span>';
+    connectStream(data.jobId);
+  } catch (e) { logBox.textContent = "[error] " + e.message; }
+}
+
+function connectStream(jobId) {
+  if (currentEventSource) currentEventSource.close();
+  currentEventSource = new EventSource(`/api/reply/stream/${jobId}`);
+  const logBox = document.getElementById("logBox");
+
+  currentEventSource.addEventListener("snapshot", (e) => {
+    const d = JSON.parse(e.data);
+    logBox.textContent = "";
+    d.logs.forEach((l) => appendLogLine(l));
+  });
+  currentEventSource.addEventListener("log", (e) => appendLogLine(JSON.parse(e.data)));
+  currentEventSource.addEventListener("done", (e) => {
+    const d = JSON.parse(e.data);
+    const badge = d.status === "success" ? "badge-success" : d.status === "stopped" ? "badge-muted" : "badge-danger";
+    document.getElementById("replyStatusBadge").innerHTML = `<span class="badge ${badge}">${d.status}</span>`;
+    document.getElementById("replyStartBtn").disabled = false;
+    document.getElementById("replyStopBtn").classList.add("hidden");
+    currentEventSource.close();
+    currentEventSource = null;
+    currentJobId = null;
+    loadHistory();
+  });
+}
+
+function appendLogLine(log) {
+  const logBox = document.getElementById("logBox");
+  const line = document.createElement("div");
+  const cls = log.type === "done" ? "log-done" : log.type === "error" ? "log-error" : log.type === "warn" ? "log-warn" : log.type === "system" ? "log-system" : log.type === "dry-run" ? "log-dry-run" : "";
+  line.className = cls;
+  line.textContent = `[${log.type}] ${log.message}`;
+  logBox.appendChild(line);
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+async function stopReply() {
+  if (!currentJobId) return;
+  await fetch(`/api/reply/stop/${currentJobId}`, { method: "POST" });
+}
+
+// ── History ────────────────────
+async function loadHistory() {
+  try {
+    const res = await fetch("/api/reply/history");
+    const data = await res.json();
+    const container = document.getElementById("historyList");
+    if (!data.runs || data.runs.length === 0) {
+      container.innerHTML = '<span style="font-size:0.82rem; color:var(--muted);">아직 실행 기록이 없습니다.</span>';
+      return;
+    }
+    container.innerHTML = data.runs.map((r) => {
+      const badge = r.status === "success" ? "badge-success" : r.status === "stopped" ? "badge-muted" : "badge-danger";
+      const date = new Date(r.started_at).toLocaleString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+      return `<div class="history-item">
+        <div><span class="badge ${badge}">${r.status}</span> ${r.platform} (${r.mode})</div>
+        <div style="color:var(--muted);">${r.scanned}스캔 / ${r.processed}처리 · ${date}</div>
+      </div>`;
+    }).join("");
+  } catch { /* ignore */ }
+}
+
+// ── Init ────────────────────
+checkSession();
+
+// ── AI Config ────────────────────
+let currentKeywords = [];
+
+const PROMPT_EXAMPLES = {
+  cafe: `역할: 당신은 [내 지역]에서 '[내 매장명]'을 운영하는 바리스타입니다.
+
+[핵심 규칙]
+1. 리뷰에 실제로 적힌 내용(메뉴명, 감정표현, 구체적 경험)만 언급하라. 리뷰에 없는 메뉴나 상황을 절대 지어내지 마라.
+2. 리뷰어의 말투 온도를 맞춰라. 감탄이 강하면 답글도 밝게, 차분한 리뷰면 차분하게.
+3. 2~3문장으로 작성하라. 마지막 문장에 재방문 기대감을 담아라.
+4. 답글 키워드는 전달되면 한 번 자연스럽게 사용하라.
+5. 이모지는 마지막에 하나만 사용하라.
+6. '~주셔서 감사합니다'로 시작하지 마라. 리뷰 핵심 내용에 공감하는 말로 시작하라.
+
+[작성 금지]
+- 리뷰에 없는 메뉴/상황 추측 금지
+- 키워드 나열 금지
+- 광고처럼 과장된 표현 금지`,
+
+  restaurant: `역할: 당신은 [내 지역]에서 '[내 매장명]'을 운영하는 사장님입니다.
+
+[핵심 규칙]
+1. 리뷰에 적힌 메뉴명, 맛 평가, 경험만 언급하라. 없는 내용을 지어내지 마라.
+2. 고객이 칭찬한 메뉴가 있으면 그 메뉴에 대한 자부심을 짧게 표현하라.
+3. 2~3문장, 마지막에 재방문 기대감.
+4. 키워드가 전달되면 자연스럽게 1회 사용.
+5. 이모지는 마지막에 하나만.
+6. 리뷰 핵심에 공감하며 시작하라.
+
+[작성 금지]
+- 리뷰에 없는 메뉴 언급 금지
+- "저희 OO이 맛있죠?" 같은 유도 금지
+- 과장 표현 금지`,
+
+  beauty: `역할: 당신은 [내 지역]에서 '[내 매장명]'을 운영하는 원장/디자이너입니다.
+
+[핵심 규칙]
+1. 리뷰에 적힌 시술명, 만족도, 구체적 경험만 언급하라.
+2. 시술 결과에 만족했다면 "잘 어울리신다"는 뉘앙스를 담아라.
+3. 2~3문장, 마지막에 다음 방문 기대감.
+4. 키워드가 전달되면 1회 자연스럽게 사용.
+5. 이모지 마지막에 하나.
+
+[작성 금지]
+- 리뷰에 없는 시술/스타일 추측 금지
+- "다음엔 OO도 해보세요" 같은 영업 금지`,
+
+  shop: `역할: 당신은 '[내 쇼핑몰명]'을 운영하는 판매자입니다.
+
+[핵심 규칙]
+1. 리뷰에 적힌 상품명, 만족 포인트만 언급하라.
+2. 배송/포장에 대한 언급이 있으면 감사를 표현하라.
+3. 2~3문장, 마지막에 재구매 기대감.
+4. 키워드가 전달되면 1회 자연스럽게 사용.
+5. 이모지 마지막에 하나.
+
+[작성 금지]
+- 리뷰에 없는 상품 추천 금지
+- 할인/이벤트 언급 금지`,
+};
+
+function toggleAiSettings() {
+  const panel = document.getElementById("aiSettingsPanel");
+  const text = document.getElementById("aiSettingsToggleText");
+  const isHidden = panel.classList.contains("hidden");
+  panel.classList.toggle("hidden");
+  text.textContent = isHidden ? "접기" : "펼치기";
+  if (isHidden) loadAiConfig();
+}
+
+function loadPromptExample(type) {
+  const prompt = PROMPT_EXAMPLES[type];
+  if (prompt) document.getElementById("cfgPrompt").value = prompt;
+}
+
+function renderKeywordTags() {
+  const container = document.getElementById("keywordTags");
+  container.innerHTML = currentKeywords.map((kw, i) =>
+    `<span style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.25rem 0.6rem;background:var(--primary)15;border:1px solid var(--primary)40;border-radius:6px;font-size:0.8rem;color:var(--primary);">
+      ${kw}
+      <span style="cursor:pointer;font-size:0.7rem;opacity:0.7;" onclick="removeKeyword(${i})">✕</span>
+    </span>`
+  ).join("");
+}
+
+function addKeyword() {
+  const input = document.getElementById("keywordInput");
+  const value = input.value.trim();
+  if (!value) return;
+  // 쉼표로 구분된 여러 키워드도 처리
+  const newKeywords = value.split(/[,，]/).map(k => k.trim()).filter(k => k && !currentKeywords.includes(k));
+  currentKeywords.push(...newKeywords);
+  renderKeywordTags();
+  input.value = "";
+}
+
+function removeKeyword(index) {
+  currentKeywords.splice(index, 1);
+  renderKeywordTags();
+}
+
+async function loadAiConfig() {
+  try {
+    const platform = document.querySelector("input[name='platform']:checked")?.value || "smartplace";
+    const res = await fetch(`/api/config?platform=${platform}`);
+    const data = await res.json();
+    const cfg = data.config || {};
+    const ai = cfg.ai || {};
+
+    document.getElementById("cfgPrompt").value = ai.systemPrompt || "";
+    document.getElementById("cfgNoReviewMsg").value = ai.noReviewBaseMessage || "";
+    document.getElementById("cfgReviewUrl").value = cfg.reviewManageUrl || "";
+    currentKeywords = Array.isArray(ai.keywords) ? [...ai.keywords] : [];
+    renderKeywordTags();
+  } catch { /* ignore */ }
+}
+
+async function saveAiConfig() {
+  const platform = document.querySelector("input[name='platform']:checked")?.value || "smartplace";
+  const config = {
+    reviewManageUrl: document.getElementById("cfgReviewUrl").value.trim(),
+    ai: {
+      systemPrompt: document.getElementById("cfgPrompt").value.trim(),
+      keywords: [...currentKeywords],
+      noReviewBaseMessage: document.getElementById("cfgNoReviewMsg").value.trim(),
+    }
+  };
+
+  try {
+    const res = await fetch("/api/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ platform, config })
+    });
+    if (!res.ok) throw new Error((await res.json()).error);
+    const statusEl = document.getElementById("cfgSaveStatus");
+    statusEl.textContent = "✓ 저장 완료";
+    setTimeout(() => { statusEl.textContent = ""; }, 2000);
+  } catch (e) {
+    document.getElementById("cfgSaveStatus").textContent = "저장 실패: " + e.message;
+  }
+}
+</script>
+</body>
+</html>
