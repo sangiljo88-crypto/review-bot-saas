@@ -11,6 +11,21 @@ const AUTH_CHECK_URLS = [
 ];
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000; // 5분
 const POLL_INTERVAL_MS = 2000;
+const QR_TAB_SELECTORS = [
+  'button:has-text("QR코드")',
+  'a:has-text("QR코드")',
+  '[role="tab"]:has-text("QR코드")',
+  '[role="tab"]:has-text("QR")',
+  'text=QR코드',
+];
+const QR_IMAGE_SELECTORS = [
+  "#qr_wrap img",
+  ".qr_area img",
+  'img[alt*="QR"]',
+  'img[src*="qr"]',
+  '[class*="qr"] img',
+  "canvas",
+];
 
 // 진행 중인 로그인 세션 관리
 const loginSessions = new Map();
@@ -25,6 +40,67 @@ function buildLaunchOptions() {
       "--disable-gpu",
     ],
   };
+}
+
+function toDataUrl(pngBuffer) {
+  return `data:image/png;base64,${pngBuffer.toString("base64")}`;
+}
+
+async function tryActivateQrTab(page) {
+  for (const selector of QR_TAB_SELECTORS) {
+    try {
+      const tab = page.locator(selector).first();
+      if (await tab.count()) {
+        await tab.click({ timeout: 1500 });
+        await page.waitForTimeout(300);
+        return true;
+      }
+    } catch {
+      // ignore and try next selector
+    }
+  }
+  return false;
+}
+
+async function captureQrDataUrl(page) {
+  for (const selector of QR_IMAGE_SELECTORS) {
+    try {
+      const element = page.locator(selector).first();
+      if (await element.count()) {
+        const screenshot = await element.screenshot({ type: "png" });
+        return toDataUrl(screenshot);
+      }
+    } catch {
+      // ignore and try next selector
+    }
+  }
+  return null;
+}
+
+async function refreshLoginPreview(session, { allowFullPageFallback = false } = {}) {
+  const { page } = session;
+
+  await tryActivateQrTab(page);
+  const qrDataUrl = await captureQrDataUrl(page);
+
+  if (qrDataUrl) {
+    session.qrDataUrl = qrDataUrl;
+    session.message = "QR 코드가 준비되었습니다. 네이버 앱으로 스캔하세요.";
+    return true;
+  }
+
+  if (allowFullPageFallback && !session.fullPageFallbackUsed) {
+    try {
+      const screenshot = await page.screenshot({ type: "png", fullPage: true });
+      session.qrDataUrl = toDataUrl(screenshot);
+      session.fullPageFallbackUsed = true;
+      session.message = "QR 자동 인식에 실패했습니다. 표시된 이미지에서 QR 코드 영역을 스캔해주세요.";
+    } catch {
+      // ignore
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -55,6 +131,7 @@ export async function launchLoginBrowser(userId, platform) {
     status: "waiting",        // waiting | checking | success | failed | cancelled
     loginUrl: NAVER_LOGIN_URL,
     qrDataUrl: null,          // QR 코드 이미지 (추후 확장용)
+    fullPageFallbackUsed: false,
     message: "네이버 로그인 페이지로 이동 중...",
     createdAt: Date.now(),
   };
@@ -76,20 +153,15 @@ async function detectLogin(session) {
 
   try {
     await page.goto(NAVER_LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 15000 });
+    try {
+      await page.waitForLoadState("networkidle", { timeout: 10000 });
+    } catch {
+      // 페이지 상태에 따라 networkidle을 못 기다릴 수 있으므로 무시
+    }
     session.message = "네이버 로그인 페이지가 준비되었습니다. 아래 방법 중 하나로 로그인해주세요.";
 
-    // 로그인 페이지의 QR 코드 캡처 시도
-    try {
-      await page.waitForTimeout(2000);
-      const qrElement = await page.$("#qr_wrap img, .qr_area img, canvas");
-      if (qrElement) {
-        const screenshot = await qrElement.screenshot({ type: "png" });
-        session.qrDataUrl = `data:image/png;base64,${screenshot.toString("base64")}`;
-        session.message = "QR 코드가 준비되었습니다. 네이버 앱으로 스캔하세요.";
-      }
-    } catch {
-      // QR 캡처 실패해도 계속 진행
-    }
+    await page.waitForTimeout(1200);
+    await refreshLoginPreview(session, { allowFullPageFallback: true });
 
     // 쿠키 감지 루프
     const startTime = Date.now();
@@ -114,15 +186,7 @@ async function detectLogin(session) {
       }
 
       // QR 갱신 시도
-      try {
-        const qrElement = await page.$("#qr_wrap img, .qr_area img, canvas");
-        if (qrElement) {
-          const screenshot = await qrElement.screenshot({ type: "png" });
-          session.qrDataUrl = `data:image/png;base64,${screenshot.toString("base64")}`;
-        }
-      } catch {
-        // ignore
-      }
+      await refreshLoginPreview(session);
 
       await page.waitForTimeout(POLL_INTERVAL_MS);
     }
