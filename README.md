@@ -50,6 +50,8 @@ npx playwright install chromium
 export DATABASE_URL="postgresql://..."
 export JWT_SECRET="dev-secret"
 export SESSION_ENCRYPT_KEY="01234567890123456789012345678901"
+# 로컬에서 크롬 창을 보면서 실행하려면
+export PLAYWRIGHT_HEADLESS="false"
 npm run dev
 ```
 

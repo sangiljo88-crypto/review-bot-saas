@@ -10,7 +10,7 @@ const DEFAULT_CONFIG = {
       replyToggleButtonByText: "답글 쓰기",
       replyTextarea: "textarea",
       submitButtonByText: "등록",
-      submitButtonSelector: 'button[data-area-code="rv.replydone"], button[data-area-code="rv.replyregister"]',
+      submitButtonSelector: 'button[data-area-code="rv.replydone"], button[data-area-code="rv.replyregister"], button[data-area-code="rv.replysubmit"]',
     },
   },
   smartstore: {
@@ -36,9 +36,24 @@ const DEFAULT_AI_CONFIG = {
   noReviewBaseMessage: "방문해 주셔서 감사합니다. 리뷰 남겨주셔서 감사합니다. 더 좋은 서비스를 위해 노력하겠습니다.",
 };
 
+const DEFAULT_REPLY_DELAY_RANGE = {
+  min: 5000,
+  max: 15000,
+};
+const SKIP_DELAY_MS = 500;
+
 function buildLaunchOptions() {
+  const explicit = process.env.PLAYWRIGHT_HEADLESS;
+  const runningOnServer = Boolean(
+    process.env.RAILWAY_PROJECT_ID ||
+    process.env.RAILWAY_ENVIRONMENT ||
+    process.env.CI
+  );
+  const headless = explicit == null
+    ? runningOnServer
+    : String(explicit).toLowerCase() !== "false";
   return {
-    headless: true,
+    headless,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
   };
 }
@@ -65,6 +80,24 @@ function asVisibleSelector(selector) {
     .join(", ");
 }
 
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeDelayRangeMs(range) {
+  const min = Number(range?.min);
+  const max = Number(range?.max);
+  const safeMin = Number.isFinite(min) && min >= 0 ? Math.floor(min) : DEFAULT_REPLY_DELAY_RANGE.min;
+  const safeMax = Number.isFinite(max) && max >= 0 ? Math.floor(max) : DEFAULT_REPLY_DELAY_RANGE.max;
+  if (safeMin <= safeMax) return { min: safeMin, max: safeMax };
+  return { min: safeMax, max: safeMin };
+}
+
+function randomIntBetween(min, max) {
+  if (min === max) return min;
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
 async function clickFirstVisible(locator, timeoutMs = 1500) {
   const count = await locator.count().catch(() => 0);
   for (let i = 0; i < count; i += 1) {
@@ -78,6 +111,323 @@ async function clickFirstVisible(locator, timeoutMs = 1500) {
     }
   }
   return false;
+}
+
+async function safeClick(locator, timeoutMs = 2200) {
+  const count = await locator.count().catch(() => 0);
+  for (let i = 0; i < count; i += 1) {
+    const target = locator.nth(i);
+    try {
+      if (!(await target.isVisible())) continue;
+      await target.click({ timeout: timeoutMs });
+      return true;
+    } catch {
+      // try next
+    }
+  }
+  if (count > 0) {
+    try {
+      await locator.first().click({ timeout: timeoutMs });
+      return true;
+    } catch {
+      // ignore
+    }
+  }
+  return false;
+}
+
+const menuTriggerNamePattern = /더보기|메뉴|옵션|more/i;
+const menuReplyActionPattern = /^(답글|답글달기|답글 달기|답변|답변작성|답변 작성|댓글달기|댓글 달기)$/i;
+const genericReplyActionPattern = /답글|답변|댓글/i;
+
+async function clickReplyActionInFloatingMenu(page) {
+  const candidates = [
+    page.getByRole("menuitem", { name: menuReplyActionPattern }),
+    page.getByRole("button", { name: menuReplyActionPattern }),
+    page.locator("[role='menu'] [role='menuitem'], [role='menu'] button, [role='menu'] a").filter({
+      hasText: genericReplyActionPattern,
+    }),
+    page.locator("button,a,li,div,span").filter({ hasText: menuReplyActionPattern }),
+  ];
+
+  for (const locator of candidates) {
+    if (await safeClick(locator, 1800)) {
+      await page.waitForTimeout(250);
+      return true;
+    }
+  }
+  return false;
+}
+
+async function hasTopRightMenuLikeButton(card) {
+  try {
+    return await card.evaluate((root) => {
+      const isVisible = (el) => {
+        const style = window.getComputedStyle(el);
+        if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      };
+      const rootRect = root.getBoundingClientRect();
+      const candidates = Array.from(root.querySelectorAll("button,[role='button']")).filter((el) => {
+        if (!isVisible(el)) return false;
+        const rect = el.getBoundingClientRect();
+        const nearTop = rect.top - rootRect.top < 160;
+        const nearRight = rootRect.right - rect.right < 160;
+        const iconLike = rect.width <= 64 && rect.height <= 64;
+        return nearTop && nearRight && iconLike;
+      });
+      return candidates.length > 0;
+    });
+  } catch {
+    return false;
+  }
+}
+
+async function clickTopRightMenuLikeButton(card) {
+  try {
+    return await card.evaluate((root) => {
+      const isVisible = (el) => {
+        const style = window.getComputedStyle(el);
+        if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      };
+      const rootRect = root.getBoundingClientRect();
+      const candidates = Array.from(root.querySelectorAll("button,[role='button']")).filter((el) => {
+        if (!isVisible(el)) return false;
+        const rect = el.getBoundingClientRect();
+        const nearTop = rect.top - rootRect.top < 160;
+        const nearRight = rootRect.right - rect.right < 160;
+        const iconLike = rect.width <= 64 && rect.height <= 64;
+        return nearTop && nearRight && iconLike;
+      });
+      if (!candidates.length) return false;
+      const target = candidates[0];
+      target.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      if (typeof target.click === "function") target.click();
+      return true;
+    });
+  } catch {
+    return false;
+  }
+}
+
+async function openReplyEditor(card, page, selectors) {
+  if (selectors.replyWriteButtonSelector) {
+    const bySelector = card.locator(selectors.replyWriteButtonSelector);
+    if (await safeClick(bySelector)) return { ok: true, method: "direct-selector" };
+  }
+
+  const byRole = card.getByRole("button", { name: new RegExp(selectors.replyToggleButtonByText, "i") });
+  if (await safeClick(byRole)) return { ok: true, method: "direct-role" };
+
+  const byText = card.getByText(new RegExp(selectors.replyToggleButtonByText, "i"));
+  if (await safeClick(byText)) return { ok: true, method: "direct-text" };
+
+  const menuTriggers = [
+    card.locator('[aria-haspopup="menu"]'),
+    card.getByRole("button", { name: menuTriggerNamePattern }),
+    card.locator("button[class*='menu'],button[class*='Menu'],button[class*='more'],button[class*='More']"),
+  ];
+  for (const trigger of menuTriggers) {
+    if (await safeClick(trigger, 1600)) {
+      if (await clickReplyActionInFloatingMenu(page)) return { ok: true, method: "menu-trigger" };
+      try {
+        await page.keyboard.press("Escape");
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  if (await clickTopRightMenuLikeButton(card)) {
+    if (await clickReplyActionInFloatingMenu(page)) return { ok: true, method: "menu-top-right" };
+  }
+
+  return { ok: false };
+}
+
+async function hasReplyActionButton(card, selectors) {
+  if (selectors.replyWriteButtonSelector) {
+    const bySelector = card.locator(selectors.replyWriteButtonSelector);
+    if ((await bySelector.count().catch(() => 0)) > 0) return true;
+  }
+
+  const pattern = new RegExp(selectors.replyToggleButtonByText, "i");
+  const byRole = card.getByRole("button", { name: pattern });
+  if ((await byRole.count().catch(() => 0)) > 0) return true;
+
+  const byLocator = card.locator(`button:has-text("${selectors.replyToggleButtonByText}")`);
+  if ((await byLocator.count().catch(() => 0)) > 0) return true;
+
+  const byText = card.getByText(pattern);
+  if ((await byText.count().catch(() => 0)) > 0) return true;
+
+  const menuByRole = card.getByRole("button", { name: menuTriggerNamePattern });
+  if ((await menuByRole.count().catch(() => 0)) > 0) return true;
+
+  const menuByAria = card.locator('[aria-haspopup="menu"]');
+  if ((await menuByAria.count().catch(() => 0)) > 0) return true;
+
+  const menuByClass = card.locator(
+    "button[class*='menu'],button[class*='Menu'],button[class*='more'],button[class*='More']"
+  );
+  if ((await menuByClass.count().catch(() => 0)) > 0) return true;
+
+  return hasTopRightMenuLikeButton(card);
+}
+
+async function fillReplyInCard(card, page, selectors, message) {
+  const opened = await openReplyEditor(card, page, selectors);
+  if (!opened.ok) {
+    return { ok: false, reason: "답글 버튼을 찾지 못함" };
+  }
+  await page.waitForTimeout(opened.method?.startsWith("menu") ? 350 : 220);
+
+  let textarea = card.locator(selectors.replyTextarea).last();
+  try {
+    await textarea.waitFor({ timeout: 2000, state: "visible" });
+    await textarea.fill(message);
+  } catch {
+    textarea = page.locator(selectors.replyTextarea).last();
+    try {
+      await textarea.waitFor({ timeout: 2500, state: "visible" });
+      await textarea.fill(message);
+    } catch {
+      return { ok: false, reason: "답글 입력창을 찾지 못함" };
+    }
+  }
+
+  return { ok: true };
+}
+
+async function clickConfirmIfPresent(page) {
+  const confirmButtons = page
+    .locator(
+      [
+        "[role='dialog'] button",
+        "[role='alertdialog'] button",
+        ".modal button",
+        ".popup button",
+        ".layer_popup button",
+      ].join(",")
+    )
+    .filter({ hasText: /확인|예|완료|닫기/i });
+  if (await safeClick(confirmButtons, 1500)) {
+    await page.waitForTimeout(220);
+    return true;
+  }
+  return false;
+}
+
+function hasOwnerReply(text, ownerReplyRegexes) {
+  if (!text) return false;
+  return ownerReplyRegexes.some((regex) => regex.test(text));
+}
+
+async function verifySubmitPersisted(card, page, selectors, ownerReplyRegexes) {
+  for (let i = 0; i < 20; i += 1) {
+    try {
+      const cardText = await card.innerText();
+      if (hasOwnerReply(cardText, ownerReplyRegexes)) return true;
+    } catch {
+      // ignore
+    }
+
+    try {
+      const editDelete = card.getByRole("button", { name: /수정|삭제/ });
+      if ((await editDelete.count().catch(() => 0)) > 0) return true;
+    } catch {
+      // ignore
+    }
+
+    try {
+      const successToast = page.getByText(/등록되었습니다|답글이 등록|저장되었습니다/i);
+      if ((await successToast.count().catch(() => 0)) > 0) return true;
+    } catch {
+      // ignore
+    }
+
+    if (selectors.replyWriteButtonSelector) {
+      try {
+        const writeButtons = card.locator(asVisibleSelector(selectors.replyWriteButtonSelector));
+        if ((await writeButtons.count().catch(() => 0)) === 0) return true;
+      } catch {
+        // ignore
+      }
+    }
+
+    try {
+      const visibleTextarea = card.locator(`${selectors.replyTextarea}:visible`);
+      const textareaCount = await visibleTextarea.count().catch(() => 0);
+      if (textareaCount === 0) {
+        const exactSubmit = card.getByRole("button", {
+          name: new RegExp(`^\\s*${escapeRegExp(selectors.submitButtonByText)}\\s*$`, "i"),
+        });
+        if ((await exactSubmit.count().catch(() => 0)) === 0) return true;
+      }
+    } catch {
+      // ignore
+    }
+
+    await page.waitForTimeout(500);
+  }
+  return false;
+}
+
+async function submitReplyInCard(card, page, selectors, ownerReplyRegexes) {
+  const exactSubmitPattern = new RegExp(`^\\s*${escapeRegExp(selectors.submitButtonByText)}\\s*$`, "i");
+  let clicked = false;
+
+  if (selectors.submitButtonSelector) {
+    const submitBySelector = card.locator(asVisibleSelector(selectors.submitButtonSelector));
+    if (await safeClick(submitBySelector)) clicked = true;
+  }
+
+  if (!clicked) {
+    const submitByRole = card.getByRole("button", { name: exactSubmitPattern });
+    if (await safeClick(submitByRole)) clicked = true;
+  }
+
+  if (!clicked) {
+    const submitByButtonText = card.locator("button").filter({ hasText: exactSubmitPattern });
+    if (await safeClick(submitByButtonText)) clicked = true;
+  }
+
+  if (!clicked) {
+    const textarea = card.locator(selectors.replyTextarea).last();
+    const nearbySubmit = textarea
+      .locator("xpath=ancestor::*[self::form or self::section or self::div][1]//button")
+      .filter({ hasText: exactSubmitPattern });
+    if (await safeClick(nearbySubmit)) clicked = true;
+  }
+
+  if (!clicked) {
+    const pageSubmit = page.getByRole("button", { name: exactSubmitPattern });
+    if (await safeClick(pageSubmit)) clicked = true;
+  }
+
+  if (!clicked) {
+    const pageFallback = page.locator("button").filter({ hasText: exactSubmitPattern });
+    if (await safeClick(pageFallback)) clicked = true;
+  }
+
+  if (!clicked) {
+    return { ok: false, reason: "등록 버튼을 찾지 못함" };
+  }
+
+  await page.waitForTimeout(300);
+  await clickConfirmIfPresent(page);
+  const persisted = await verifySubmitPersisted(card, page, selectors, ownerReplyRegexes);
+  if (!persisted) {
+    return { ok: false, reason: "등록 클릭 후 저장 확인 실패" };
+  }
+
+  return { ok: true };
 }
 
 async function hasSmartplaceReviewSignals(scope, selectors) {
@@ -448,6 +798,10 @@ async function narrowToActionableCards(cards, scope, selectors) {
   return best;
 }
 
+async function waitAfterSkip(page) {
+  await page.waitForTimeout(SKIP_DELAY_MS);
+}
+
 async function scrollReviewSurface(scope, page) {
   try {
     await scope.evaluate(() => {
@@ -502,6 +856,7 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
     const aiConfig = mergeAiConfig(userConfig, apiKey);
     const dryRun = run.mode !== "submit";
     const limit = maxReplies && Number.isFinite(maxReplies) ? maxReplies : Infinity;
+    const delayRange = normalizeDelayRangeMs(platformConfig.replyDelayRangeMs || userConfig.replyDelayRangeMs);
 
     if (isUnsetSmartplaceReviewUrl(run.platform, userConfig)) {
       onLog("error", "스마트플레이스 리뷰 관리 URL이 설정되지 않았습니다. [AI 답글 설정]에서 본인 매장의 '리뷰관리 페이지 URL'을 저장한 뒤 다시 실행해주세요.");
@@ -535,6 +890,7 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
     }
 
     let sourceChoice = await chooseBestCardSource(page, scope, sel);
+    let runSurface = sourceChoice.target;
     let cards = sourceChoice.selected.locator;
     let total = await cards.count();
     onLog("system", `리뷰 카드 ${total}개 발견 (surface: ${sourceChoice.label}, source: ${sourceChoice.selected.label})`);
@@ -552,6 +908,7 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
         onLog("warn", "답글여부 '미등록' 필터 적용에 실패했습니다. 전체 리뷰 대상으로 진행합니다.");
       } else {
         sourceChoice = await chooseBestCardSource(page, scope, sel);
+        runSurface = sourceChoice.target;
         cards = sourceChoice.selected.locator;
         total = await cards.count();
         onLog("system", `필터 적용 후 리뷰 카드 ${total}개 (surface: ${sourceChoice.label}, source: ${sourceChoice.selected.label})`);
@@ -570,6 +927,7 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
         await page.waitForTimeout(1300);
         scope = await chooseReviewScope(page, sel);
         sourceChoice = await chooseBestCardSource(page, scope, sel);
+        runSurface = sourceChoice.target;
         cards = sourceChoice.selected.locator;
         total = await cards.count();
         onLog("system", `재탐색 결과: 리뷰 카드 ${total}개 (surface: ${sourceChoice.label}, source: ${sourceChoice.selected.label})`);
@@ -599,19 +957,13 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
       return;
     }
 
-    const actionable = await narrowToActionableCards(cards, sourceChoice.target, sel);
-    if (actionable && actionable.count > 0) {
-      cards = actionable.locator;
-      total = actionable.count;
-      onLog("system", `답글 작성 가능한 카드 ${total}개로 재선정 (${actionable.label})`);
-    }
-
     const ownerPatterns = run.platform === "smartstore"
       ? [/판매자.*답글/i, /답글 완료/i]
       : [/사장님.*답글/i, /답글 완료/i];
 
     let skippedAlreadyReplied = 0;
     let skippedNoAction = 0;
+    let skippedNoSubmit = 0;
     let skippedAi = 0;
     let skippedNoTextarea = 0;
 
@@ -625,7 +977,7 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
       }
 
       if (cursor >= total) {
-        await scrollReviewSurface(scope, page);
+        await scrollReviewSurface(runSurface, page);
         await page.waitForTimeout(900);
         const nextTotal = await cards.count();
         if (nextTotal > total) {
@@ -642,17 +994,34 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
       }
 
       const card = cards.nth(cursor);
+      const cardOrder = cursor + 1;
       cursor++;
       result.scanned++;
 
       try { await card.scrollIntoViewIfNeeded(); } catch { /* */ }
 
       let cardText = "";
-      try { cardText = await card.innerText(); } catch { continue; }
+      try {
+        cardText = await card.innerText();
+      } catch {
+        await waitAfterSkip(page);
+        continue;
+      }
 
       // 이미 답글 있는지 확인
       if (ownerPatterns.some((p) => p.test(cardText))) {
         skippedAlreadyReplied += 1;
+        await waitAfterSkip(page);
+        continue;
+      }
+
+      const hasReplyAction = await hasReplyActionButton(card, sel);
+      if (!hasReplyAction) {
+        skippedNoAction += 1;
+        if (skippedNoAction <= 3) {
+          onLog("warn", `#${cardOrder} 답글 버튼 없음(선택자 미일치 가능) -> skip`);
+        }
+        await waitAfterSkip(page);
         continue;
       }
 
@@ -667,46 +1036,21 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
       } catch (err) {
         onLog("error", `AI 답글 생성 실패: ${err.message}`);
         skippedAi += 1;
+        await waitAfterSkip(page);
         continue;
       }
 
       if (!reply) {
         skippedAi += 1;
+        await waitAfterSkip(page);
         continue;
       }
 
-      // 답글 버튼 클릭
-      let opened = false;
-      if (sel.replyWriteButtonSelector) {
-        try {
-          const btn = card.locator(sel.replyWriteButtonSelector);
-          if (await btn.count() > 0) { await btn.first().click({ timeout: 2000 }); opened = true; }
-        } catch { /* */ }
-      }
-      if (!opened) {
-        try {
-          const btn = card.getByRole("button", { name: new RegExp(sel.replyToggleButtonByText, "i") });
-          if (await btn.count() > 0) { await btn.first().click({ timeout: 2000 }); opened = true; }
-        } catch { /* */ }
-      }
-      if (!opened) {
-        skippedNoAction += 1;
-        if (skippedNoAction <= 3) {
-          onLog("warn", `#${cursor} 답글 버튼을 찾지 못해 스킵`);
-        }
-        continue;
-      }
-
-      await page.waitForTimeout(300);
-
-      // textarea에 답글 입력
-      try {
-        const textarea = card.locator(sel.replyTextarea).last();
-        await textarea.waitFor({ timeout: 2000, state: "visible" });
-        await textarea.fill(reply);
-      } catch {
-        onLog("warn", `#${cursor} 답글 입력창 없음`);
+      const filled = await fillReplyInCard(card, page, sel, reply);
+      if (!filled.ok) {
+        onLog("warn", `#${cardOrder} 입력 실패: ${filled.reason} -> skip`);
         skippedNoTextarea += 1;
+        await waitAfterSkip(page);
         continue;
       }
 
@@ -716,34 +1060,24 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
         continue;
       }
 
-      // 등록 버튼 클릭
-      let submitted = false;
-      if (sel.submitButtonSelector) {
-        try {
-          const btn = card.locator(sel.submitButtonSelector);
-          if (await btn.count() > 0) { await btn.first().click({ timeout: 2000 }); submitted = true; }
-        } catch { /* */ }
-      }
-      if (!submitted) {
-        try {
-          const btn = card.getByRole("button", { name: new RegExp(`^\\s*${sel.submitButtonByText}\\s*$`, "i") });
-          if (await btn.count() > 0) { await btn.first().click({ timeout: 2000 }); submitted = true; }
-        } catch { /* */ }
+      const submitted = await submitReplyInCard(card, page, sel, ownerPatterns);
+      if (!submitted.ok) {
+        skippedNoSubmit += 1;
+        onLog("warn", `#${cardOrder} 등록 실패: ${submitted.reason} -> skip`);
+        await waitAfterSkip(page);
+        continue;
       }
 
-      if (submitted) {
-        result.processed++;
-        onLog("done", `#${result.processed} 답글 등록 완료`);
-        // 랜덤 딜레이
-        const delay = 5000 + Math.random() * 10000;
-        await page.waitForTimeout(delay);
-      }
+      result.processed++;
+      onLog("done", `#${result.processed} 답글 등록 완료`);
+      const waitMs = randomIntBetween(delayRange.min, delayRange.max);
+      await page.waitForTimeout(waitMs);
     }
 
     onLog("system", `완료: 스캔 ${result.scanned}개, 처리 ${result.processed}개`);
     onLog(
       "system",
-      `스킵 요약: 기답글 ${skippedAlreadyReplied}개, 답글버튼없음 ${skippedNoAction}개, 입력창없음 ${skippedNoTextarea}개, AI실패 ${skippedAi}개`
+      `스킵 요약: 기답글 ${skippedAlreadyReplied}개, 답글버튼없음 ${skippedNoAction}개, 입력창없음 ${skippedNoTextarea}개, 등록실패 ${skippedNoSubmit}개, AI실패 ${skippedAi}개`
     );
   } catch (err) {
     onLog("error", `실행 오류: ${err.message}`);

@@ -42,8 +42,17 @@ const QR_IMAGE_SELECTORS = [
 const loginSessions = new Map();
 
 function buildLaunchOptions() {
+  const explicit = process.env.PLAYWRIGHT_HEADLESS;
+  const runningOnServer = Boolean(
+    process.env.RAILWAY_PROJECT_ID ||
+    process.env.RAILWAY_ENVIRONMENT ||
+    process.env.CI
+  );
+  const headless = explicit == null
+    ? runningOnServer
+    : String(explicit).toLowerCase() !== "false";
   return {
-    headless: true,
+    headless,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
