@@ -303,6 +303,151 @@ async function chooseBestCardSource(page, preferredScope, selectors) {
   };
 }
 
+async function isUnrepliedFilterSelected(scope) {
+  const quickSelectors = [
+    '[data-area-code="rv.replyno"].Select_active__Mj9Uk',
+    '[data-area-code="rv.replyno"][aria-selected="true"]',
+    '[data-area-code="rv.replyno"][aria-pressed="true"]',
+    "[role='option'][aria-selected='true']",
+    "[role='menuitemradio'][aria-checked='true']",
+    "[role='radio'][aria-checked='true']",
+    "[data-selected='true']",
+    "[data-state='checked']",
+  ];
+
+  for (const selector of quickSelectors) {
+    const count = await scope.locator(selector).filter({ hasText: /^미등록$/ }).count().catch(() => 0);
+    if (count > 0) return true;
+  }
+
+  const headingWithUnreplied = await scope
+    .locator("button,[role='button'],div,span,p,label")
+    .filter({ hasText: /답글여부/ })
+    .filter({ hasText: /미등록/ })
+    .count()
+    .catch(() => 0);
+  return headingWithUnreplied > 0;
+}
+
+async function clickUnrepliedOption(scope) {
+  const candidates = [
+    scope.locator('[data-area-code="rv.replyno"]'),
+    scope.getByRole("option", { name: /미등록/ }),
+    scope.getByRole("menuitem", { name: /미등록/ }),
+    scope.getByRole("menuitemradio", { name: /미등록/ }),
+    scope.getByRole("radio", { name: /미등록/ }),
+    scope.getByText(/^미등록$/),
+    scope.locator("li,button,a,div,span,p,label").filter({ hasText: /^미등록$/ }),
+  ];
+
+  for (const locator of candidates) {
+    if (await clickFirstVisible(locator, 1300)) {
+      await scope.waitForTimeout(700);
+      return true;
+    }
+  }
+  return false;
+}
+
+async function applyUnrepliedFilter(scope, page, onLog) {
+  if (await isUnrepliedFilterSelected(scope)) {
+    onLog("system", "답글여부 필터가 이미 '미등록'으로 설정되어 있습니다.");
+    return true;
+  }
+
+  if (await clickUnrepliedOption(scope)) {
+    if (await isUnrepliedFilterSelected(scope)) {
+      onLog("system", "답글여부 필터 '미등록' 적용 완료(data-area/direct).");
+      return true;
+    }
+  }
+
+  const triggers = [
+    scope.locator('[data-area-code="rv.replyfilter"]'),
+    scope.getByRole("button", { name: /답글여부/ }),
+    scope.locator("button,[role='button'],div[role='button'],span").filter({ hasText: /답글여부/ }),
+    scope.locator("button,[role='button'],div[role='button'],span").filter({ hasText: /^전체$/ }),
+  ];
+
+  for (const trigger of triggers) {
+    if (!(await clickFirstVisible(trigger, 1200))) continue;
+    await scope.waitForTimeout(220);
+    if (await clickUnrepliedOption(scope)) {
+      if (await isUnrepliedFilterSelected(scope)) {
+        onLog("system", "답글여부 필터 '미등록' 적용 완료(dropdown).");
+        return true;
+      }
+    }
+    try {
+      await page.keyboard.press("Escape");
+    } catch {
+      // ignore
+    }
+  }
+
+  // 마지막 fallback: DOM click
+  const domClicked = await scope
+    .evaluate(() => {
+      const normalize = (v) => (v || "").replace(/\s+/g, "").trim();
+      const isVisible = (el) => {
+        if (!el) return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      };
+      const nodes = Array.from(
+        document.querySelectorAll("button,[role='button'],li,a,div,span,p,label,[role='option'],[role='menuitem']")
+      ).filter((el) => isVisible(el) && normalize(el.textContent) === "미등록");
+
+      const target = nodes[0];
+      if (!target) return false;
+
+      target.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      if (typeof target.click === "function") {
+        target.click();
+      }
+      return true;
+    })
+    .catch(() => false);
+
+  if (domClicked) {
+    await scope.waitForTimeout(700);
+    if (await isUnrepliedFilterSelected(scope)) {
+      onLog("system", "답글여부 필터 '미등록' 적용 완료(dom-fallback).");
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function narrowToActionableCards(cards, scope, selectors) {
+  const variants = [];
+  if (selectors.replyWriteButtonSelector) {
+    variants.push({
+      label: "has-reply-write-selector",
+      locator: cards.filter({ has: scope.locator(selectors.replyWriteButtonSelector) }),
+    });
+  }
+  variants.push({
+    label: "has-reply-button-text",
+    locator: cards.filter({ has: scope.locator(`button:has-text("${selectors.replyToggleButtonByText}")`) }),
+  });
+
+  let best = null;
+  for (const variant of variants) {
+    const count = await variant.locator.count().catch(() => 0);
+    if (count > 0 && (!best || count > best.count)) {
+      best = { ...variant, count };
+    }
+  }
+  return best;
+}
+
 async function scrollReviewSurface(scope, page) {
   try {
     await scope.evaluate(() => {
@@ -394,6 +539,25 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
     let total = await cards.count();
     onLog("system", `리뷰 카드 ${total}개 발견 (surface: ${sourceChoice.label}, source: ${sourceChoice.selected.label})`);
 
+    if (run.platform === "smartplace" && total > 0) {
+      const surfaces = [sourceChoice.target, scope, page].filter((target, idx, arr) => target && arr.indexOf(target) === idx);
+      let filterApplied = false;
+      for (const surface of surfaces) {
+        if (await applyUnrepliedFilter(surface, page, onLog)) {
+          filterApplied = true;
+          break;
+        }
+      }
+      if (!filterApplied) {
+        onLog("warn", "답글여부 '미등록' 필터 적용에 실패했습니다. 전체 리뷰 대상으로 진행합니다.");
+      } else {
+        sourceChoice = await chooseBestCardSource(page, scope, sel);
+        cards = sourceChoice.selected.locator;
+        total = await cards.count();
+        onLog("system", `필터 적용 후 리뷰 카드 ${total}개 (surface: ${sourceChoice.label}, source: ${sourceChoice.selected.label})`);
+      }
+    }
+
     if (total === 0) {
       if (run.platform === "smartplace") {
         onLog("warn", "리뷰 카드가 0개라서 리뷰 페이지를 다시 열고 한 번 더 탐색합니다.");
@@ -435,9 +599,21 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
       return;
     }
 
+    const actionable = await narrowToActionableCards(cards, sourceChoice.target, sel);
+    if (actionable && actionable.count > 0) {
+      cards = actionable.locator;
+      total = actionable.count;
+      onLog("system", `답글 작성 가능한 카드 ${total}개로 재선정 (${actionable.label})`);
+    }
+
     const ownerPatterns = run.platform === "smartstore"
       ? [/판매자.*답글/i, /답글 완료/i]
       : [/사장님.*답글/i, /답글 완료/i];
+
+    let skippedAlreadyReplied = 0;
+    let skippedNoAction = 0;
+    let skippedAi = 0;
+    let skippedNoTextarea = 0;
 
     let cursor = 0;
     let exhaustedScrollTry = 0;
@@ -476,6 +652,7 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
 
       // 이미 답글 있는지 확인
       if (ownerPatterns.some((p) => p.test(cardText))) {
+        skippedAlreadyReplied += 1;
         continue;
       }
 
@@ -489,10 +666,14 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
         });
       } catch (err) {
         onLog("error", `AI 답글 생성 실패: ${err.message}`);
+        skippedAi += 1;
         continue;
       }
 
-      if (!reply) continue;
+      if (!reply) {
+        skippedAi += 1;
+        continue;
+      }
 
       // 답글 버튼 클릭
       let opened = false;
@@ -508,7 +689,13 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
           if (await btn.count() > 0) { await btn.first().click({ timeout: 2000 }); opened = true; }
         } catch { /* */ }
       }
-      if (!opened) continue;
+      if (!opened) {
+        skippedNoAction += 1;
+        if (skippedNoAction <= 3) {
+          onLog("warn", `#${cursor} 답글 버튼을 찾지 못해 스킵`);
+        }
+        continue;
+      }
 
       await page.waitForTimeout(300);
 
@@ -519,6 +706,7 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
         await textarea.fill(reply);
       } catch {
         onLog("warn", `#${cursor} 답글 입력창 없음`);
+        skippedNoTextarea += 1;
         continue;
       }
 
@@ -553,6 +741,10 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
     }
 
     onLog("system", `완료: 스캔 ${result.scanned}개, 처리 ${result.processed}개`);
+    onLog(
+      "system",
+      `스킵 요약: 기답글 ${skippedAlreadyReplied}개, 답글버튼없음 ${skippedNoAction}개, 입력창없음 ${skippedNoTextarea}개, AI실패 ${skippedAi}개`
+    );
   } catch (err) {
     onLog("error", `실행 오류: ${err.message}`);
     result.status = "failed";
