@@ -29,6 +29,8 @@ const noiseLinePatterns = [
   /^\+\d+$/
 ];
 
+const chipLinePattern = /^(?:[^\p{L}\p{N}]?\s*)?[가-힣A-Za-z0-9\s]{1,24}(맛있어요|좋아요|친절해요|훌륭해요|만족해요|추천해요|깔끔해요|아쉬워요|재방문할게요)(?:\s*\+\d+)?$/u;
+
 const styleHints = [
   "따뜻하고 담백한 톤",
   "친근하고 경쾌한 톤",
@@ -100,6 +102,20 @@ function isNoiseLine(line) {
   return false;
 }
 
+function isChipLikeLine(line) {
+  const trimmed = (line || "").trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (chipLinePattern.test(trimmed)) {
+    return true;
+  }
+  if (/^[☕🍞🥐🍰🍽️⭐]\s*/u.test(trimmed) && trimmed.length <= 28) {
+    return true;
+  }
+  return false;
+}
+
 function pickRandomStyleHint() {
   const idx = Math.floor(Math.random() * styleHints.length);
   return styleHints[idx];
@@ -118,6 +134,15 @@ export function extractReviewText(rawText) {
     .filter((line) => !isNoiseLine(line));
 
   const uniqueLines = Array.from(new Set(lines));
+  const withoutChips = uniqueLines.filter((line) => !isChipLikeLine(line));
+  const longFormLines = withoutChips.filter((line) => line.length >= 12 || /[.!?~]/.test(line));
+
+  if (longFormLines.length > 0) {
+    return normalizeReviewText(longFormLines.join(" "));
+  }
+  if (withoutChips.length > 0) {
+    return normalizeReviewText(withoutChips.join(" "));
+  }
   return normalizeReviewText(uniqueLines.join(" "));
 }
 
@@ -136,6 +161,8 @@ function buildUserPromptWithKeyword(reviewText, selectedKeyword) {
   return [
     "다음 고객 리뷰에 답글을 작성해 주세요.",
     "- 리뷰에 없는 사실/메뉴/상황을 지어내지 말 것",
+    "- 리뷰 본문에서 핵심 단어 1~2개를 그대로 반영할 것(예: 소금빵, 데워주셔서, 친절)",
+    "- 리뷰 본문에 없는 메뉴명/맛 표현(예: 커피, 라떼, 깊은 맛)을 임의로 쓰지 말 것",
     "- 리뷰어의 감정 톤에 맞춰 답변할 것",
     "- 한국어로 작성",
     "- 과장/허위 표현 금지",
@@ -149,6 +176,13 @@ function buildUserPromptWithKeyword(reviewText, selectedKeyword) {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function hasCoffeeHallucination(reviewText, content) {
+  const review = normalizeReviewText(reviewText);
+  const reply = normalizeReviewText(content);
+  const coffeePattern = /(커피|라떼|아메리카노|에스프레소)/;
+  return coffeePattern.test(reply) && !coffeePattern.test(review);
 }
 
 function pickRandomKeyword(keywords) {
@@ -298,6 +332,16 @@ async function generateWithAI(reviewText, aiConfig) {
       "중요: 직전과 비슷한 답글이 나왔습니다. 표현을 바꿔 완전히 다른 문장으로 다시 작성하세요."
     ].join("\n");
     content = await requestChatCompletion(client, aiConfig, retryPrompt, 0.1);
+  }
+
+  if (content && hasCoffeeHallucination(reviewText, content)) {
+    const groundingPrompt = [
+      userPrompt,
+      "",
+      "중요: 리뷰 본문에 없는 메뉴명(특히 커피/라떼/아메리카노/에스프레소) 언급 금지.",
+      "리뷰 본문 단어를 반드시 1개 이상 그대로 써서 다시 작성하세요."
+    ].join("\n");
+    content = await requestChatCompletion(client, aiConfig, groundingPrompt, 0.05);
   }
 
   if (!content) {

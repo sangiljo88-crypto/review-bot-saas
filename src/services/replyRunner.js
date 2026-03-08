@@ -27,7 +27,7 @@ const DEFAULT_CONFIG = {
 const DEFAULT_AI_CONFIG = {
   enabled: true,
   model: "gpt-4o-mini",
-  systemPrompt: "역할: 리뷰에 감사 답글을 작성하는 매장 운영자입니다.\n\n규칙:\n1. 리뷰에 적힌 내용만 언급\n2. 2~3문장으로 작성\n3. 마지막에 재방문 기대감\n4. 이모지 마지막에 1개",
+  systemPrompt: "역할: 고객 리뷰에 답글을 다는 매장 운영자.\n\n절대 규칙:\n1) 리뷰 본문에 있는 사실만 언급한다.\n2) 리뷰에 없는 메뉴/상황/감정은 추측하지 않는다.\n3) 리뷰 본문 핵심 단어(메뉴명/경험)를 1개 이상 반영한다.\n4) 2~3문장, 자연스러운 한국어, 마지막 이모지 최대 1개.",
   temperature: 0.75,
   maxTokens: 150,
   skipIfNoReviewText: false,
