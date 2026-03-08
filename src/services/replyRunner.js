@@ -8,7 +8,7 @@ const DEFAULT_CONFIG = {
       reviewCard: "li[class*='Review_pui_review__'], li[class*='review'], article[class*='review'], div[class*='review-card'], div[class*='Review']",
       replyWriteButtonSelector: 'button[data-area-code="rv.replywrite"]',
       replyToggleButtonByText: "답글 쓰기",
-      replyTextarea: "textarea",
+      replyTextarea: "textarea#replyWrite, textarea",
       submitButtonByText: "등록",
       submitButtonSelector: 'button[data-area-code="rv.replydone"], button[data-area-code="rv.replyregister"], button[data-area-code="rv.replysubmit"]',
     },
@@ -288,12 +288,13 @@ async function fillReplyInCard(card, page, selectors, message) {
   }
   await page.waitForTimeout(opened.method?.startsWith("menu") ? 350 : 220);
 
-  let textarea = card.locator(selectors.replyTextarea).last();
+  const visibleTextareaSelector = asVisibleSelector(selectors.replyTextarea);
+  let textarea = card.locator(visibleTextareaSelector).last();
   try {
     await textarea.waitFor({ timeout: 2000, state: "visible" });
     await textarea.fill(message);
   } catch {
-    textarea = page.locator(selectors.replyTextarea).last();
+    textarea = page.locator(visibleTextareaSelector).last();
     try {
       await textarea.waitFor({ timeout: 2500, state: "visible" });
       await textarea.fill(message);
@@ -601,6 +602,13 @@ async function selectReviewCardsLocator(scope, selectors) {
       label: "configured",
       locator: scope.locator(visibleReviewCard),
     });
+    if (selectors.replyWriteButtonSelector) {
+      const visibleReplyWrite = asVisibleSelector(selectors.replyWriteButtonSelector);
+      candidates.push({
+        label: "configured-with-reply-write",
+        locator: scope.locator(visibleReviewCard).filter({ has: scope.locator(visibleReplyWrite) }),
+      });
+    }
   }
 
   candidates.push({
@@ -637,10 +645,14 @@ async function chooseBestCardSource(page, preferredScope, selectors) {
     const stats = selected.stats || { count: 0, score: 0 };
     const count = Number(stats.count) || 0;
     const score = Number(stats.score) || 0;
-    const rank = score + Math.min(count, 200);
+    let actionCount = 0;
+    if (selectors.replyWriteButtonSelector) {
+      actionCount = await source.target.locator(asVisibleSelector(selectors.replyWriteButtonSelector)).count().catch(() => 0);
+    }
+    const rank = score + Math.min(count, 200) + actionCount * 30;
 
     if (!best || rank > best.rank) {
-      best = { ...source, selected, count, rank };
+      best = { ...source, selected, count, rank, actionCount };
     }
   }
 
@@ -654,6 +666,20 @@ async function chooseBestCardSource(page, preferredScope, selectors) {
 }
 
 async function isUnrepliedFilterSelected(scope) {
+  const selectedByFilterText = await scope
+    .locator('[data-area-code="rv.replyfilter"]')
+    .filter({ hasText: /^미등록$/ })
+    .count()
+    .catch(() => 0);
+  if (selectedByFilterText > 0) return true;
+
+  const selectedByFilterClass = await scope
+    .locator('[data-area-code="rv.replyfilter"] .Select_active__Mj9Uk')
+    .filter({ hasText: /^미등록$/ })
+    .count()
+    .catch(() => 0);
+  if (selectedByFilterClass > 0) return true;
+
   const quickSelectors = [
     '[data-area-code="rv.replyno"].Select_active__Mj9Uk',
     '[data-area-code="rv.replyno"][aria-selected="true"]',
@@ -682,6 +708,7 @@ async function isUnrepliedFilterSelected(scope) {
 async function clickUnrepliedOption(scope) {
   const candidates = [
     scope.locator('[data-area-code="rv.replyno"]'),
+    scope.locator('a[data-area-code="rv.replyno"][role="button"]'),
     scope.getByRole("option", { name: /미등록/ }),
     scope.getByRole("menuitem", { name: /미등록/ }),
     scope.getByRole("menuitemradio", { name: /미등록/ }),
@@ -691,7 +718,7 @@ async function clickUnrepliedOption(scope) {
   ];
 
   for (const locator of candidates) {
-    if (await clickFirstVisible(locator, 1300)) {
+    if (await safeClick(locator, 1500)) {
       await scope.waitForTimeout(700);
       return true;
     }
@@ -714,13 +741,14 @@ async function applyUnrepliedFilter(scope, page, onLog) {
 
   const triggers = [
     scope.locator('[data-area-code="rv.replyfilter"]'),
+    scope.locator('a[data-area-code="rv.replyfilter"][role="button"]'),
     scope.getByRole("button", { name: /답글여부/ }),
     scope.locator("button,[role='button'],div[role='button'],span").filter({ hasText: /답글여부/ }),
     scope.locator("button,[role='button'],div[role='button'],span").filter({ hasText: /^전체$/ }),
   ];
 
   for (const trigger of triggers) {
-    if (!(await clickFirstVisible(trigger, 1200))) continue;
+    if (!(await safeClick(trigger, 1500))) continue;
     await scope.waitForTimeout(220);
     if (await clickUnrepliedOption(scope)) {
       if (await isUnrepliedFilterSelected(scope)) {
@@ -893,7 +921,10 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
     let runSurface = sourceChoice.target;
     let cards = sourceChoice.selected.locator;
     let total = await cards.count();
-    onLog("system", `리뷰 카드 ${total}개 발견 (surface: ${sourceChoice.label}, source: ${sourceChoice.selected.label})`);
+    onLog(
+      "system",
+      `리뷰 카드 ${total}개 발견 (surface: ${sourceChoice.label}, source: ${sourceChoice.selected.label}, replyActions: ${sourceChoice.actionCount || 0})`
+    );
 
     if (run.platform === "smartplace" && total > 0) {
       const surfaces = [sourceChoice.target, scope, page].filter((target, idx, arr) => target && arr.indexOf(target) === idx);
@@ -911,7 +942,10 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
         runSurface = sourceChoice.target;
         cards = sourceChoice.selected.locator;
         total = await cards.count();
-        onLog("system", `필터 적용 후 리뷰 카드 ${total}개 (surface: ${sourceChoice.label}, source: ${sourceChoice.selected.label})`);
+        onLog(
+          "system",
+          `필터 적용 후 리뷰 카드 ${total}개 (surface: ${sourceChoice.label}, source: ${sourceChoice.selected.label}, replyActions: ${sourceChoice.actionCount || 0})`
+        );
       }
     }
 
@@ -930,7 +964,10 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
         runSurface = sourceChoice.target;
         cards = sourceChoice.selected.locator;
         total = await cards.count();
-        onLog("system", `재탐색 결과: 리뷰 카드 ${total}개 (surface: ${sourceChoice.label}, source: ${sourceChoice.selected.label})`);
+        onLog(
+          "system",
+          `재탐색 결과: 리뷰 카드 ${total}개 (surface: ${sourceChoice.label}, source: ${sourceChoice.selected.label}, replyActions: ${sourceChoice.actionCount || 0})`
+        );
       }
     }
 
@@ -955,6 +992,13 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
       result.status = "failed";
       result.exitCode = 1;
       return;
+    }
+
+    const actionable = await narrowToActionableCards(cards, runSurface, sel);
+    if (actionable && actionable.count > 0) {
+      cards = actionable.locator;
+      total = actionable.count;
+      onLog("system", `답글 작성 가능한 카드 ${total}개로 재선정 (${actionable.label})`);
     }
 
     const ownerPatterns = run.platform === "smartstore"
