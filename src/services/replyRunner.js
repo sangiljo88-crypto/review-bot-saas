@@ -462,23 +462,37 @@ async function scoreReviewSurface(scope, selectors) {
     const cardCount = await scope.locator(selectors.reviewCard).count();
     score += Math.min(cardCount, 300);
 
+    let replyWriteCount = 0;
+    if (selectors.replyWriteButtonSelector) {
+      replyWriteCount = await scope.locator(selectors.replyWriteButtonSelector).count();
+      score += Math.min(replyWriteCount, 200) * 25;
+    }
+
     let replyButtonCount = await scope.locator(`button:has-text("${selectors.replyToggleButtonByText}")`).count();
     if (selectors.replyWriteButtonSelector) {
-      replyButtonCount += await scope.locator(selectors.replyWriteButtonSelector).count();
+      replyButtonCount += replyWriteCount;
     }
     score += Math.min(replyButtonCount, 200) * 4;
+
+    const filterMarkers = await scope.locator('[data-area-code="rv.replyfilter"], [data-area-code="rv.replyno"]').count();
+    score += Math.min(filterMarkers, 20) * 6;
   } catch {
     return -1;
   }
   return score;
 }
 
-async function chooseReviewScope(page, selectors) {
-  const candidates = [page, ...page.frames().filter((frame) => frame !== page.mainFrame())];
+async function chooseReviewScope(page, selectors, { preferFrames = false } = {}) {
+  const frames = page.frames().filter((frame) => frame !== page.mainFrame());
+  const candidates = preferFrames && frames.length > 0 ? [...frames, page] : [page, ...frames];
   let bestScope = page;
   let bestScore = -1;
   for (const scope of candidates) {
     const score = await scoreReviewSurface(scope, selectors);
+    if (preferFrames && scope === page && frames.length > 0) {
+      // 스마트플레이스에서 메인 페이지의 generic 엘리먼트가 과대평가되는 것 방지
+      if (score <= 0) continue;
+    }
     if (score > bestScore) {
       bestScore = score;
       bestScope = scope;
@@ -525,7 +539,7 @@ async function ensureSmartplaceReviewPage(page, platformConfig, selectors, onLog
     }
     await page.waitForTimeout(1500);
 
-    const scope = await chooseReviewScope(page, selectors);
+    const scope = await chooseReviewScope(page, selectors, { preferFrames: true });
     if (await hasSmartplaceReviewSignals(scope, selectors)) {
       return scope;
     }
@@ -539,7 +553,7 @@ async function ensureSmartplaceReviewPage(page, platformConfig, selectors, onLog
         onLog("system", `내 플레이스 진입 성공(${entry}). 리뷰 페이지를 다시 엽니다.`);
         await page.goto(reviewUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
         await page.waitForTimeout(1500);
-        const retriedScope = await chooseReviewScope(page, selectors);
+        const retriedScope = await chooseReviewScope(page, selectors, { preferFrames: true });
         if (await hasSmartplaceReviewSignals(retriedScope, selectors)) {
           return retriedScope;
         }
@@ -628,6 +642,24 @@ async function selectReviewCardsLocator(scope, selectors) {
 }
 
 async function chooseBestCardSource(page, preferredScope, selectors) {
+  if (preferredScope && preferredScope !== page && selectors.replyWriteButtonSelector) {
+    const preferredActionCount = await preferredScope
+      .locator(asVisibleSelector(selectors.replyWriteButtonSelector))
+      .count()
+      .catch(() => 0);
+    if (preferredActionCount > 0) {
+      const selected = await selectReviewCardsLocator(preferredScope, selectors);
+      return {
+        target: preferredScope,
+        label: "scope",
+        selected,
+        count: Number(selected?.stats?.count || 0),
+        rank: Number(selected?.stats?.score || 0) + preferredActionCount * 30,
+        actionCount: preferredActionCount,
+      };
+    }
+  }
+
   const sources = [];
 
   const pushSource = (target, label) => {
@@ -917,6 +949,18 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
       scope = await chooseReviewScope(page, sel);
     }
 
+    if (run.platform === "smartplace" && sel.replyWriteButtonSelector) {
+      const scopeReplyActions = await scope
+        .locator(asVisibleSelector(sel.replyWriteButtonSelector))
+        .count()
+        .catch(() => 0);
+      const pageReplyActions = await page
+        .locator(asVisibleSelector(sel.replyWriteButtonSelector))
+        .count()
+        .catch(() => 0);
+      onLog("system", `스코프 점검: scope.replywrite=${scopeReplyActions}, page.replywrite=${pageReplyActions}`);
+    }
+
     let sourceChoice = await chooseBestCardSource(page, scope, sel);
     let runSurface = sourceChoice.target;
     let cards = sourceChoice.selected.locator;
@@ -959,7 +1003,7 @@ export async function executeReplyJob({ run, sessionData, userConfig, apiKey, ma
           // ignore
         }
         await page.waitForTimeout(1300);
-        scope = await chooseReviewScope(page, sel);
+        scope = await chooseReviewScope(page, sel, { preferFrames: true });
         sourceChoice = await chooseBestCardSource(page, scope, sel);
         runSurface = sourceChoice.target;
         cards = sourceChoice.selected.locator;
